@@ -15,6 +15,9 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret-key")
 
+# Configure file upload limits
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+
 # Configure API keys
 aai.settings.api_key = os.getenv('ASSEMBLYAI_API_KEY')
 
@@ -65,16 +68,29 @@ def tts_echo():
     Echo Bot endpoint: Receives audio, transcribes it with AssemblyAI, 
     and returns TTS audio of the transcript using Murf AI
     """
-    if 'audio_file' not in request.files:
-        return jsonify({'error': 'No audio file found'}), 400
+    try:
+        app.logger.info("TTS Echo endpoint called")
+        app.logger.info(f"Request content type: {request.content_type}")
+        app.logger.info(f"Request files keys: {list(request.files.keys()) if request.files else 'None'}")
+        
+        if 'audio_file' not in request.files:
+            app.logger.error("No audio_file in request.files")
+            return jsonify({'error': 'No audio file found'}), 400
 
-    audio_file = request.files['audio_file']
-    
-    # Validate audio file
-    if audio_file.filename == '':
-        return jsonify({'error': 'No audio file selected'}), 400
+        audio_file = request.files['audio_file']
+        
+        # Validate audio file
+        if audio_file.filename == '':
+            app.logger.error("Empty filename")
+            return jsonify({'error': 'No audio file selected'}), 400
 
-    app.logger.info(f"Processing audio file: {audio_file.filename}")
+        app.logger.info(f"Processing audio file: {audio_file.filename}")
+        app.logger.info(f"Audio file size: {len(audio_file.read())} bytes")
+        audio_file.seek(0)  # Reset file pointer after reading for size
+        
+    except Exception as e:
+        app.logger.error(f"Error in initial file handling: {str(e)}")
+        return jsonify({'error': f'File upload error: {str(e)}'}), 400
 
     # Step 1: Transcribe the audio using AssemblyAI
     try:
@@ -127,10 +143,19 @@ def tts_echo():
 def not_found_error(error):
     return jsonify({'error': 'Endpoint not found'}), 404
 
+@app.errorhandler(413)
+def too_large_error(error):
+    return jsonify({'error': 'File too large. Maximum size is 16MB.'}), 413
+
 @app.errorhandler(500)
 def internal_error(error):
     app.logger.error(f"Internal server error: {error}")
     return jsonify({'error': 'Internal server error'}), 500
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    app.logger.error(f"Unhandled exception: {str(e)}")
+    return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 if __name__ == '__main__':
     # Run the Flask app on port 5000 as specified
