@@ -123,11 +123,22 @@ def tts_echo():
             return jsonify({'error': 'Murf client not initialized.'}), 500
         
         app.logger.info(f"Generating TTS for transcribed text: '{transcript_text[:50]}...'")
-        res = murf_client.text_to_speech.generate(
-            text=transcript_text, 
-            voice_id="en-US-linda", 
-            format="mp3"
-        )
+        
+        # Try with a different voice that might be more reliable
+        try:
+            res = murf_client.text_to_speech.generate(
+                text=transcript_text, 
+                voice_id="en-US-terrell",  # Use same voice as the main generator
+                format="mp3"
+            )
+        except Exception as first_error:
+            app.logger.warning(f"First voice failed: {str(first_error)}, trying alternative voice...")
+            # Try with a different voice as fallback
+            res = murf_client.text_to_speech.generate(
+                text=transcript_text, 
+                voice_id="en-US-linda", 
+                format="mp3"
+            )
         
         app.logger.info(f"Murf TTS successful. Audio URL: {res.audio_file}")
         return jsonify({
