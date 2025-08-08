@@ -80,7 +80,12 @@ def tts_echo():
     try:
         app.logger.info("Starting transcription with AssemblyAI...")
         transcriber = aai.Transcriber()
-        transcript = transcriber.transcribe(audio_file)
+        
+        # Convert FileStorage to bytes for AssemblyAI
+        audio_file.seek(0)  # Reset file pointer to beginning
+        audio_data = audio_file.read()
+        
+        transcript = transcriber.transcribe(audio_data)
 
         if transcript.status == aai.TranscriptStatus.error:
             app.logger.error(f"Transcription error: {transcript.error}")
