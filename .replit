@@ -44,3 +44,6 @@ args = "uv add python-dotenv murf assemblyai"
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[agent]
+integrations = ["python_gemini==1.0.0"]

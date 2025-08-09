@@ -1,173 +1,99 @@
 import os
-import logging
 from flask import Flask, render_template, request, jsonify
 from dotenv import load_dotenv
 from murf.client import Murf
 import assemblyai as aai
+import google.generativeai as genai # Import the Gemini SDK
 
-# Configure logging for debugging
-logging.basicConfig(level=logging.DEBUG)
-
-# Load environment variables
+# --- Load API Keys ---
 load_dotenv()
-
-# Initialize Flask app
-app = Flask(__name__)
-app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret-key")
-
-# Configure file upload limits
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
-
-# Configure API keys
 aai.settings.api_key = os.getenv('ASSEMBLYAI_API_KEY')
+# Configure the Gemini API key
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-# Initialize Murf Client
+
+app = Flask(__name__)
+
+# --- Initialize Murf Client ---
 try:
     murf_client = Murf()
-    app.logger.info("Murf client initialized successfully")
 except Exception as e:
-    app.logger.error(f"Failed to initialize Murf client: {e}")
+    print(f"Failed to initialize Murf client: {e}")
     murf_client = None
 
+# --- Main Route ---
 @app.route('/')
 def index():
-    """Serve the main page with the voice processing interface"""
     return render_template('index.html')
 
+# --- Existing Endpoints ---
 @app.route('/generate-audio', methods=['POST'])
 def generate_audio():
-    """Generate audio from text using Murf AI TTS"""
     if not murf_client:
-        app.logger.error("Murf client not initialized")
         return jsonify({'error': 'Murf client not initialized.'}), 500
-    
     data = request.get_json()
     if not data or 'text' not in data:
         return jsonify({'error': 'No text provided'}), 400
-    
     text_to_convert = data.get('text')
-    if not text_to_convert.strip():
-        return jsonify({'error': 'Empty text provided'}), 400
-    
     try:
-        app.logger.info(f"Generating audio for text: {text_to_convert[:50]}...")
-        res = murf_client.text_to_speech.generate(
-            text=text_to_convert, 
-            voice_id="en-US-terrell", 
-            format="mp3"
-        )
-        app.logger.info(f"Audio generated successfully: {res.audio_file}")
+        res = murf_client.text_to_speech.generate(text=text_to_convert, voice_id="en-US-terrell", format="mp3")
         return jsonify({'audioUrl': res.audio_file})
     except Exception as e:
-        app.logger.error(f"Error calling Murf API: {str(e)}")
         return jsonify({'error': f'Error calling Murf API: {str(e)}'}), 502
 
 @app.route('/tts/echo', methods=['POST'])
 def tts_echo():
-    """
-    Echo Bot endpoint: Receives audio, transcribes it with AssemblyAI, 
-    and returns TTS audio of the transcript using Murf AI
-    """
+    if 'audio_file' not in request.files:
+        return jsonify({'error': 'No audio file found'}), 400
+    audio_file = request.files['audio_file']
+    transcript_text = ""
     try:
-        app.logger.info("TTS Echo endpoint called")
-        app.logger.info(f"Request content type: {request.content_type}")
-        app.logger.info(f"Request files keys: {list(request.files.keys()) if request.files else 'None'}")
-        
-        if 'audio_file' not in request.files:
-            app.logger.error("No audio_file in request.files")
-            return jsonify({'error': 'No audio file found'}), 400
-
-        audio_file = request.files['audio_file']
-        
-        # Validate audio file
-        if audio_file.filename == '':
-            app.logger.error("Empty filename")
-            return jsonify({'error': 'No audio file selected'}), 400
-
-        app.logger.info(f"Processing audio file: {audio_file.filename}")
-        app.logger.info(f"Audio file size: {len(audio_file.read())} bytes")
-        audio_file.seek(0)  # Reset file pointer after reading for size
-        
-    except Exception as e:
-        app.logger.error(f"Error in initial file handling: {str(e)}")
-        return jsonify({'error': f'File upload error: {str(e)}'}), 400
-
-    # Step 1: Transcribe the audio using AssemblyAI
-    try:
-        app.logger.info("Starting transcription with AssemblyAI...")
         transcriber = aai.Transcriber()
-        
-        # Convert FileStorage to bytes for AssemblyAI
-        audio_file.seek(0)  # Reset file pointer to beginning
-        audio_data = audio_file.read()
-        
-        transcript = transcriber.transcribe(audio_data)
-
+        transcript = transcriber.transcribe(audio_file)
         if transcript.status == aai.TranscriptStatus.error:
-            app.logger.error(f"Transcription error: {transcript.error}")
-            return jsonify({'error': f'Transcription failed: {transcript.error}'}), 500
-        
+            return jsonify({'error': transcript.error}), 500
         transcript_text = transcript.text
-        app.logger.info(f"Transcription successful: '{transcript_text}'")
-
-        if not transcript_text or transcript_text.strip() == '':
+        if not transcript_text:
             return jsonify({'error': 'No speech detected in the audio.'}), 400
-
     except Exception as e:
-        app.logger.error(f"Error during transcription: {str(e)}")
         return jsonify({'error': f'Transcription failed: {str(e)}'}), 500
-
-    # Step 2: Generate new audio from the transcript using Murf
     try:
         if not murf_client:
             return jsonify({'error': 'Murf client not initialized.'}), 500
-        
-        app.logger.info(f"Generating TTS for transcribed text: '{transcript_text[:50]}...'")
-        
-        # Try with a different voice that might be more reliable
-        try:
-            res = murf_client.text_to_speech.generate(
-                text=transcript_text, 
-                voice_id="en-US-terrell",  # Use same voice as the main generator
-                format="mp3"
-            )
-        except Exception as first_error:
-            app.logger.warning(f"First voice failed: {str(first_error)}, trying alternative voice...")
-            # Try with a different voice as fallback
-            res = murf_client.text_to_speech.generate(
-                text=transcript_text, 
-                voice_id="en-US-linda", 
-                format="mp3"
-            )
-        
-        app.logger.info(f"Murf TTS successful. Audio URL: {res.audio_file}")
-        return jsonify({
-            'audioUrl': res.audio_file,
-            'transcription': transcript_text
-        })
-
+        res = murf_client.text_to_speech.generate(text=transcript_text, voice_id="en-US-linda", format="mp3")
+        return jsonify({'audioUrl': res.audio_file})
     except Exception as e:
-        app.logger.error(f"Error during Murf TTS: {str(e)}")
         return jsonify({'error': f'Murf TTS failed: {str(e)}'}), 502
 
-@app.errorhandler(404)
-def not_found_error(error):
-    return jsonify({'error': 'Endpoint not found'}), 404
+# ===================================================
+# --- NEW ENDPOINT FOR DAY 8 ---
+# ===================================================
+@app.route('/llm/query', methods=['POST'])
+def llm_query():
+    """Accepts text and gets a response from the Gemini LLM."""
+    data = request.get_json()
+    if not data or 'text' not in data:
+        return jsonify({'error': 'No text provided'}), 400
 
-@app.errorhandler(413)
-def too_large_error(error):
-    return jsonify({'error': 'File too large. Maximum size is 16MB.'}), 413
+    input_text = data.get('text')
+    print(f"Received query for LLM: '{input_text}'")
 
-@app.errorhandler(500)
-def internal_error(error):
-    app.logger.error(f"Internal server error: {error}")
-    return jsonify({'error': 'Internal server error'}), 500
+    try:
+        # Initialize the Gemini model
+        model = genai.GenerativeModel('gemini-pro')
+        
+        # Generate the response
+        response = model.generate_content(input_text)
+        
+        print(f"LLM Response: '{response.text}'")
+        # Return the generated text in a JSON object
+        return jsonify({'response': response.text})
 
-@app.errorhandler(Exception)
-def handle_exception(e):
-    app.logger.error(f"Unhandled exception: {str(e)}")
-    return jsonify({'error': f'Server error: {str(e)}'}), 500
+    except Exception as e:
+        print(f"--- ERROR FROM GEMINI API ---: {str(e)}")
+        return jsonify({'error': f'Error calling Gemini API: {str(e)}'}), 500
 
 if __name__ == '__main__':
-    # Run the Flask app on port 5000 as specified
+    # Use host='0.0.0.0' to run on Replit
     app.run(host='0.0.0.0', port=5000, debug=True)
+    
