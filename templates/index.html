@@ -1,327 +1,57 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Voice Suite</title>
-    <style>
-        /* General Setup */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
-
-        :root {
-            --bg-color: #1a1a1d;
-            --card-color: #2c2c34;
-            --primary-color: #4a90e2;
-            --text-color: #f5f5f7;
-            --text-muted-color: #8e8e93;
-            --border-color: #44444c;
-            --success-color: #34c759;
-            --error-color: #ff3b30;
-            --warning-color: #ff9f0a;
-        }
-
-        * {
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            padding: 1rem;
-            -webkit-font-smoothing: antialiased;
-        }
-
-        /* Main App Container */
-        .app-container {
-            background-color: var(--card-color);
-            border-radius: 20px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-            width: 100%;
-            max-width: 600px;
-            padding: 2rem;
-            border: 1px solid var(--border-color);
-        }
-
-        /* Tab Navigation */
-        .tab-nav {
-            display: flex;
-            border-bottom: 1px solid var(--border-color);
-            margin-bottom: 2rem;
-        }
-
-        .tab-button {
-            background: none;
-            border: none;
-            color: var(--text-muted-color);
-            padding: 1rem;
-            font-size: 1rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            border-bottom: 3px solid transparent;
-            flex: 1;
-        }
-
-        .tab-button:hover {
-            color: var(--primary-color);
-        }
-
-        .tab-button.active {
-            color: var(--primary-color);
-            border-bottom: 3px solid var(--primary-color);
-        }
-
-        /* Tab Content */
-        .tab-content {
-            display: none;
-        }
-
-        .tab-content.active {
-            display: block;
-        }
-
-        /* General Typography */
-        h2 {
-            text-align: center;
-            margin-bottom: 1.5rem;
-            font-weight: 700;
-            color: var(--text-color);
-        }
-
-        /* Form Controls */
-        textarea {
-            width: 100%;
-            background-color: var(--bg-color);
-            border: 1px solid var(--border-color);
-            color: var(--text-color);
-            border-radius: 10px;
-            padding: 1rem;
-            font-size: 1rem;
-            margin-bottom: 1rem;
-            font-family: inherit;
-            resize: vertical;
-            min-height: 100px;
-            transition: border-color 0.2s ease;
-        }
-
-        textarea:focus {
-            outline: none;
-            border-color: var(--primary-color);
-        }
-
-        textarea::placeholder {
-            color: var(--text-muted-color);
-        }
-
-        /* AI Generator Button */
-        #generate-btn {
-            width: 100%;
-            padding: 1rem;
-            border: none;
-            border-radius: 10px;
-            background-color: var(--primary-color);
-            color: white;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            font-family: inherit;
-        }
-
-        #generate-btn:hover:not(:disabled) {
-            background-color: #3a7bc8;
-            transform: translateY(-1px);
-        }
-
-        #generate-btn:disabled {
-            background-color: #3a5f8a;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        /* Echo Bot Controls */
-        .echo-controls {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-        }
-
-        .record-button {
-            background: none;
-            border: 2px solid var(--border-color);
-            color: var(--text-muted-color);
-            border-radius: 50%;
-            width: 80px;
-            height: 80px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            position: relative;
-        }
-
-        .record-button svg {
-            width: 32px;
-            height: 32px;
-            fill: var(--text-muted-color);
-            transition: fill 0.2s ease;
-        }
-
-        .record-button:hover:not(:disabled) {
-            border-color: var(--primary-color);
-            transform: scale(1.05);
-        }
-
-        .record-button:hover:not(:disabled) svg {
-            fill: var(--primary-color);
-        }
-
-        .record-button.recording {
-            border-color: var(--error-color);
-            animation: pulse 1.5s infinite;
-        }
-
-        .record-button.recording svg {
-            fill: var(--error-color);
-        }
-
-        .record-button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        @keyframes pulse {
-            0% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.4); }
-            70% { box-shadow: 0 0 0 10px rgba(255, 59, 48, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0); }
-        }
-
-        /* Audio Containers */
-        #audio-container, #echo-bot-container {
-            margin-top: 1.5rem;
-            min-height: 60px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-
-        #audio-container audio, #echo-bot-container audio {
-            width: 100%;
-            border-radius: 10px;
-            background-color: var(--bg-color);
-        }
-
-        /* Status Messages */
-        #upload-status {
-            margin-top: 1rem;
-            font-weight: 500;
-            min-height: 24px;
-            text-align: center;
-            padding: 0.5rem;
-            border-radius: 8px;
-            transition: all 0.2s ease;
-        }
-
-        .success {
-            color: var(--success-color);
-            background-color: rgba(52, 199, 89, 0.1);
-        }
-
-        .error {
-            color: var(--error-color);
-            background-color: rgba(255, 59, 48, 0.1);
-        }
-
-        .processing {
-            color: var(--warning-color);
-            background-color: rgba(255, 159, 10, 0.1);
-        }
-
-        /* Loading Animation */
-        .loading {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid var(--border-color);
-            border-radius: 50%;
-            border-top-color: var(--primary-color);
-            animation: spin 1s ease-in-out infinite;
-            margin-left: 0.5rem;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        /* Responsive Design */
-        @media (max-width: 480px) {
-            .app-container {
-                padding: 1.5rem;
-                margin: 0.5rem;
-            }
-
-            .tab-button {
-                padding: 0.75rem;
-                font-size: 0.9rem;
-            }
-
-            .record-button {
-                width: 70px;
-                height: 70px;
-            }
-
-            .record-button svg {
-                width: 28px;
-                height: 28px;
-            }
-        }
-    </style>
+    <title>Speech to Text</title>
 </head>
 <body>
-    <div class="app-container">
-        <nav class="tab-nav">
-            <button class="tab-button active" data-tab="ai-generator">AI Voice Generator</button>
-            <button class="tab-button" data-tab="echo-bot">Echo Bot</button>
-        </nav>
+    <h1>Speech Recognition</h1>
+    <button id="recordBtn">🎤 Start Recording</button>
+    <p id="result"></p>
 
-        <!-- AI Voice Generator Tab -->
-        <div id="ai-generator" class="tab-content active">
-            <h2>AI Voice Generator</h2>
-            <textarea id="text-input" rows="4" placeholder="Type something to convert to speech..."></textarea>
-            <button id="generate-btn">Generate Audio</button>
-            <div id="audio-container"></div>
-        </div>
+    <script>
+        const recordBtn = document.getElementById('recordBtn');
+        const result = document.getElementById('result');
 
-        <!-- Echo Bot Tab -->
-        <div id="echo-bot" class="tab-content">
-            <h2>Echo Bot v2</h2>
-            <div class="echo-controls">
-                <button id="start-btn" class="record-button" title="Start Recording">
-                    <svg viewBox="0 0 24 24">
-                        <path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zM17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"></path>
-                    </svg>
-                </button>
-                <button id="stop-btn" class="record-button" disabled title="Stop Recording">
-                    <svg viewBox="0 0 24 24">
-                        <path d="M6 6h12v12H6z"></path>
-                    </svg>
-                </button>
-            </div>
-            <div id="upload-status"></div>
-            <div id="echo-bot-container"></div>
-        </div>
-    </div>
-    
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
+        let mediaRecorder;
+        let audioChunks = [];
+
+        recordBtn.addEventListener('click', async () => {
+            if (mediaRecorder && mediaRecorder.state === "recording") {
+                mediaRecorder.stop();
+                recordBtn.textContent = "🎤 Start Recording";
+                return;
+            }
+
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+
+            mediaRecorder.ondataavailable = e => {
+                audioChunks.push(e.data);
+            };
+
+            mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                audioChunks = [];
+
+                const formData = new FormData();
+                formData.append("audio", audioBlob, "recording.wav");
+
+                const res = await fetch("/speech-to-text", {
+                    method: "POST",
+                    body: formData
+                });
+
+                const data = await res.json();
+                if (data.text) {
+                    result.textContent = "You said: " + data.text;
+                } else {
+                    result.textContent = "Error: " + data.error;
+                }
+            };
+
+            mediaRecorder.start();
+            recordBtn.textContent = "⏹ Stop Recording";
+        });
+    </script>
 </body>
 </html>
