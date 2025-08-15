@@ -4,8 +4,8 @@ from flask import Flask, render_template, request, jsonify
 from dotenv import load_dotenv
 import assemblyai as aai
 import google.generativeai as genai
-# We are assuming 'murf' is a custom client or library you have
-# from murf.client import Murf 
+# This is your real Murf client import
+from murf.client import Murf 
 
 # ===================================================
 # --- CONFIGURATION ---
@@ -36,22 +36,11 @@ class NoSpeechDetectedError(Exception): pass
 class LLMError(Exception): pass
 class TTSError(Exception): pass
 
-# Mock Murf client since the library isn't standard.
-# In your actual code, you would use: from murf.client import Murf
-class MockMurfClient:
-    def __init__(self):
-        self.text_to_speech = self
-    def generate(self, text, voice_id, format):
-        logging.info(f"MOCK TTS: Generating audio for '{text}'")
-        class MockResponse:
-            def __init__(self):
-                # In a real scenario, this would be a URL to a generated audio file.
-                self.audio_file = "https://cdn.pixabay.com/audio/2022/03/15/audio_23b375207e.mp3" 
-        return MockResponse()
+# We are no longer using the MockMurfClient
 
 try:
-    # murf_client = Murf() # Your original code
-    murf_client = MockMurfClient() # Using mock for demonstration
+    # This is the FIX: Use the real Murf client
+    murf_client = Murf() 
     logging.info("Murf client initialized successfully.")
 except Exception as e:
     logging.error(f"Failed to initialize Murf client: {e}")
