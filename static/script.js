@@ -1,130 +1,168 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const tabs = document.querySelectorAll('.tab-button');
-    const tabContents = document.querySelectorAll('.tab-content');
-    tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            tabs.forEach(item => item.classList.remove('active'));
-            tabContents.forEach(item => item.classList.remove('active'));
-            const target = document.querySelector(`#${tab.dataset.tab}`);
-            tab.classList.add('active');
-            target.classList.add('active');
-        });
-    });
+    const recordBtn = document.getElementById('record-btn');
+    const endBtn = document.getElementById('end-btn');
+    const statusEl = document.getElementById('status');
+    const chatHistory = document.getElementById('chat-history');
+    const audioPlayerContainer = document.getElementById('audio-player');
 
-    const generateBtn = document.getElementById('generate-btn');
-    const textInput = document.getElementById('text-input');
-    const audioContainer = document.getElementById('audio-container');
-    generateBtn.addEventListener('click', async () => {
-        const text = textInput.value.trim();
-        if (text === '') { return alert('Please enter some text!'); }
-        generateBtn.disabled = true;
-        generateBtn.textContent = 'Generating...';
-        audioContainer.innerHTML = '';
+    const sessionId = new URLSearchParams(window.location.search).get('session_id') || crypto.randomUUID();
+    if (!new URLSearchParams(window.location.search).get('session_id')) {
+        const u = new URL(window.location);
+        u.searchParams.set('session_id', sessionId);
+        window.history.replaceState({}, '', u);
+    }
+
+    let mediaRecorder = null;
+    let mediaStream = null;
+    let audioChunks = [];
+    let isRecording = false;
+
+    function appendMessage(sender, text) {
+        const d = document.createElement('div');
+        d.className = `chat-message ${sender}`;
+        d.innerHTML = `<strong>${sender === 'you' ? 'You' : 'AI'}:</strong> ${text}`;
+        chatHistory.appendChild(d);
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+    }
+
+    function updateStatus(text, type = 'info') {
+        statusEl.textContent = text;
+        statusEl.className = `status-${type}`;
+    }
+
+    function setUIState(state) {
+        recordBtn.disabled = state === 'processing';
+        endBtn.disabled = state === 'idle';
+        if (state === 'recording') {
+            recordBtn.classList.add('recording');
+        } else {
+            recordBtn.classList.remove('recording');
+        }
+    }
+
+    function playAudio(url, onEndedCallback) {
+        audioPlayerContainer.innerHTML = '';
+        const player = document.createElement('audio');
+        player.src = url;
+        player.autoplay = true;
+        audioPlayerContainer.appendChild(player);
+        player.onended = onEndedCallback;
+    }
+
+    function playFallbackAudio() {
+        updateStatus('Playing error message...', 'error');
+        setUIState('processing');
+        fetch('/generate-fallback-audio', { method: 'POST' })
+            .then(res => res.ok ? res.json() : Promise.reject('Failed to get fallback audio'))
+            .then(data => playAudio(data.audioUrl, () => setUIState('idle')))
+            .catch(err => {
+                console.error("CRITICAL: Could not play fallback audio.", err);
+                updateStatus('❌ A critical error occurred. Please refresh.', 'error');
+                setUIState('idle');
+            });
+    }
+
+    async function startRecording() {
+        if (isRecording) return;
         try {
-            const response = await fetch('/generate-audio', {
+            mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            isRecording = true;
+            setUIState('recording');
+            updateStatus('Listening...', 'listening');
+
+            audioChunks = [];
+            mediaRecorder = new MediaRecorder(mediaStream);
+            mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+
+            mediaRecorder.onstop = async () => {
+                if (mediaStream) mediaStream.getTracks().forEach(track => track.stop());
+
+                setUIState('processing');
+                updateStatus('Thinking...');
+                const formData = new FormData();
+                formData.append('audio_file', new Blob(audioChunks, { type: 'audio/wav' }));
+
+                try {
+                    const resp = await fetch(`/agent/chat/${sessionId}`, { method: 'POST', body: formData });
+                    const data = await resp.json();
+
+                    if (!resp.ok) {
+                        if (data.error_code) playFallbackAudio();
+                        else throw new Error(data.error || 'Unknown server error');
+                        return;
+                    }
+
+                    if (data.no_speech) {
+                        updateStatus('No speech detected. Try again.', 'error');
+                        setUIState('idle');
+                        return;
+                    }
+
+                    appendMessage('you', data.user_transcript);
+                    appendMessage('ai', data.llm_response);
+                    playAudio(data.audioUrl, startRecording);
+
+                } catch (err) {
+                    console.error('Chat pipeline error:', err);
+                    updateStatus(`❌ Error: ${err.message}`, 'error');
+                    setUIState('idle');
+                }
+            };
+            mediaRecorder.start();
+        } catch (err) {
+            console.error('Microphone access error:', err);
+            updateStatus('❌ Error: Could not access microphone.', 'error');
+            setUIState('idle');
+        }
+    }
+
+    function stopRecording() {
+        if (mediaRecorder && isRecording) {
+            isRecording = false;
+            mediaRecorder.stop();
+        }
+    }
+
+    async function endConversation() {
+        isRecording = false;
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+        }
+        if (mediaStream) {
+            mediaStream.getTracks().forEach(track => track.stop());
+        }
+
+        setUIState('processing');
+        updateStatus('Ending conversation...', 'info');
+        try {
+            const resp = await fetch(`/agent/chat/${sessionId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: text }),
+                body: JSON.stringify({ end_convo: true })
             });
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Something went wrong.');
-            }
-            const data = await response.json();
-            const audioPlayer = document.createElement('audio');
-            audioPlayer.controls = true;
-            audioPlayer.src = data.audioUrl;
-            audioContainer.appendChild(audioPlayer);
-            audioPlayer.play();
-        } catch (error) {
-            console.error('Error:', error);
-            alert(`An error occurred: ${error.message}`);
-        } finally {
-            generateBtn.disabled = false;
-            generateBtn.textContent = 'Generate Audio';
+            const data = await resp.json();
+            if (data.error) throw new Error(data.error);
+            appendMessage('ai', data.llm_response);
+            playAudio(data.audioUrl, () => {
+                updateStatus('Conversation ended. Click mic to start again.');
+                setUIState('idle');
+            });
+        } catch (err) {
+            console.error('End convo error:', err);
+            updateStatus('❌ Failed to end conversation gracefully.', 'error');
+            setUIState('idle');
+        }
+    }
+
+    recordBtn.addEventListener('click', () => {
+        if (isRecording) {
+            stopRecording();
+        } else {
+            startRecording();
         }
     });
 
-    const startBtn = document.getElementById('start-btn');
-    const stopBtn = document.getElementById('stop-btn');
-    const echoBotContainer = document.getElementById('echo-bot-container');
-    const uploadStatus = document.getElementById('upload-status');
-    const transcriptionDisplay = document.getElementById('transcription-display');
-    let mediaRecorder;
-    let audioChunks = [];
-    let mediaStream;
+    endBtn.addEventListener('click', endConversation);
 
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        startBtn.addEventListener('click', async () => {
-            try {
-                mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                startBtn.disabled = true;
-                startBtn.classList.add('recording');
-                stopBtn.disabled = false;
-                echoBotContainer.innerHTML = '';
-                uploadStatus.innerHTML = '';
-                transcriptionDisplay.innerHTML = '';
-                audioChunks = [];
-                mediaRecorder = new MediaRecorder(mediaStream);
-                mediaRecorder.start();
-                mediaRecorder.addEventListener('dataavailable', event => {
-                    audioChunks.push(event.data);
-                });
-                mediaRecorder.addEventListener('stop', () => {
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-                    uploadStatus.textContent = 'Echoing your voice...';
-                    uploadStatus.className = '';
-                    const formData = new FormData();
-                    formData.append('audio_file', audioBlob, 'user-recording.wav');
-                    fetch('/tts/echo', {
-                        method: 'POST',
-                        body: formData,
-                    })
-                    .then(response => {
-                        if (!response.ok) {
-                            return response.json().then(err => { throw new Error(err.error || 'Echo failed') });
-                        }
-                        return response.json();
-                    })
-                    .then(data => {
-                        console.log('Echo Success:', data);
-                        uploadStatus.textContent = '✅ Echo successful!';
-                        uploadStatus.className = 'success';
-
-                        // NEW: Display the transcription from the response
-                        transcriptionDisplay.textContent = `You said: "${data.transcription}"`;
-
-                        // Play the new AI audio
-                        const audioPlayer = document.createElement('audio');
-                        audioPlayer.controls = true;
-                        audioPlayer.src = data.audioUrl;
-                        audioPlayer.autoplay = true;
-                        echoBotContainer.appendChild(audioPlayer);
-                    })
-                    .catch(error => {
-                        console.error('Echo Error:', error);
-                        uploadStatus.textContent = `❌ Echo failed: ${error.message}`;
-                        uploadStatus.className = 'error';
-                    });
-                    if (mediaStream) {
-                        mediaStream.getTracks().forEach(track => track.stop());
-                    }
-                });
-            } catch (err) {
-                console.error('Error getting media stream:', err);
-                alert('Could not access your microphone.');
-            }
-        });
-        stopBtn.addEventListener('click', () => {
-            if (mediaRecorder && mediaRecorder.state === 'recording') {
-                mediaRecorder.stop();
-                startBtn.disabled = false;
-                startBtn.classList.remove('recording');
-                stopBtn.disabled = true;
-            }
-        });
-    } else {
-        alert('Sorry, your browser does not support audio recording.');
-        startBtn.disabled = true;
-    }
+    setUIState('idle');
 });
