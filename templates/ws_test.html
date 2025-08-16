@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+  <body>
+    <h2>WebSocket Test</h2>
+    <input id="msg" placeholder="Type message"/>
+    <button onclick="sendMsg()">Send</button>
+    <div id="log"></div>
+
+    <script>
+      const ws = new WebSocket("ws://" + window.location.host + "/ws");
+      ws.onopen = () => log("✅ Connected to WebSocket!");
+      ws.onmessage = (event) => log("📩 Received: " + event.data);
+
+      function sendMsg() {
+        const msg = document.getElementById("msg").value;
+        ws.send(msg);
+        log("➡️ Sent: " + msg);
+      }
+
+      function log(text) {
+        const logDiv = document.getElementById("log");
+        logDiv.innerHTML += `<p>${text}</p>`;
+      }
+    </script>
+  </body>
+</html>

@@ -31,7 +31,7 @@
         #end-btn:hover:not(:disabled) { background-color: var(--error-color); border-color: var(--error-color); color: white; }
 
         #status { min-height: 22px; font-weight: 500; margin-bottom: 1rem; }
-        #audio-player { display: none; } /* Hide the audio player for a cleaner look */
+        #audio-player { display: none; }
         .status-listening { color: var(--primary-color); }
         .status-error { color: var(--error-color); }
     </style>
@@ -50,6 +50,8 @@
         <div id="status">Click the mic to start the conversation.</div>
         <div id="audio-player"></div>
     </div>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

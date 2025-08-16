@@ -5,8 +5,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatHistory = document.getElementById('chat-history');
     const audioPlayerContainer = document.getElementById('audio-player');
 
-    const sessionId = new URLSearchParams(window.location.search).get('session_id') || crypto.randomUUID();
-    if (!new URLSearchParams(window.location.search).get('session_id')) {
+    const params = new URLSearchParams(window.location.search);
+    let sessionId = params.get('session_id');
+    if (!sessionId) {
+        sessionId = crypto.randomUUID();
         const u = new URL(window.location);
         u.searchParams.set('session_id', sessionId);
         window.history.replaceState({}, '', u);
@@ -27,26 +29,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateStatus(text, type = 'info') {
         statusEl.textContent = text;
-        statusEl.className = `status-${type}`;
+        statusEl.className = type === 'listening' ? 'status-listening' : (type === 'error' ? 'status-error' : '');
     }
 
     function setUIState(state) {
-        recordBtn.disabled = state === 'processing';
-        endBtn.disabled = state === 'idle';
         if (state === 'recording') {
+            recordBtn.disabled = false;
+            endBtn.disabled = false;
             recordBtn.classList.add('recording');
+        } else if (state === 'processing') {
+            recordBtn.disabled = true;
+            endBtn.disabled = false;
+            recordBtn.classList.remove('recording');
         } else {
+            // idle
+            recordBtn.disabled = false;
+            endBtn.disabled = true;
             recordBtn.classList.remove('recording');
         }
     }
 
-    function playAudio(url, onEndedCallback) {
+    function playAudio(url, onEnded) {
         audioPlayerContainer.innerHTML = '';
         const player = document.createElement('audio');
         player.src = url;
         player.autoplay = true;
         audioPlayerContainer.appendChild(player);
-        player.onended = onEndedCallback;
+        if (onEnded) player.addEventListener('ended', onEnded);
     }
 
     function playFallbackAudio() {
@@ -72,15 +81,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
             audioChunks = [];
             mediaRecorder = new MediaRecorder(mediaStream);
-            mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+            mediaRecorder.ondataavailable = e => e.data && e.data.size && audioChunks.push(e.data);
 
             mediaRecorder.onstop = async () => {
-                if (mediaStream) mediaStream.getTracks().forEach(track => track.stop());
-
+                mediaStream && mediaStream.getTracks().forEach(t => t.stop());
                 setUIState('processing');
+
+                // Nothing captured?
+                const blob = new Blob(audioChunks, { type: 'audio/wav' });
+                if (!blob || blob.size === 0) {
+                    updateStatus('No speech detected. Try again.', 'error');
+                    setUIState('idle');
+                    isRecording = false;
+                    return;
+                }
+
                 updateStatus('Thinking...');
                 const formData = new FormData();
-                formData.append('audio_file', new Blob(audioChunks, { type: 'audio/wav' }));
+                formData.append('audio_file', blob, 'user-recording.wav');
 
                 try {
                     const resp = await fetch(`/agent/chat/${sessionId}`, { method: 'POST', body: formData });
@@ -98,16 +116,26 @@ document.addEventListener('DOMContentLoaded', () => {
                         return;
                     }
 
-                    appendMessage('you', data.user_transcript);
-                    appendMessage('ai', data.llm_response);
-                    playAudio(data.audioUrl, startRecording);
-
+                    appendMessage('you', data.user_transcript || '');
+                    appendMessage('ai', data.llm_response || '');
+                    if (data.audioUrl) {
+                        playAudio(data.audioUrl, () => {
+                            // auto-restart listening after the bot finishes
+                            startRecording();
+                        });
+                    } else {
+                        updateStatus('No audio returned from TTS.', 'error');
+                        setUIState('idle');
+                    }
                 } catch (err) {
                     console.error('Chat pipeline error:', err);
                     updateStatus(`❌ Error: ${err.message}`, 'error');
                     setUIState('idle');
+                } finally {
+                    isRecording = false;
                 }
             };
+
             mediaRecorder.start();
         } catch (err) {
             console.error('Microphone access error:', err);
@@ -120,17 +148,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (mediaRecorder && isRecording) {
             isRecording = false;
             mediaRecorder.stop();
+            updateStatus('Processing...', 'info');
+        } else if (!isRecording) {
+            // If user clicks when not recording, treat as no-op (prevents "no speech" error path)
+            updateStatus('Click mic to start recording.', 'info');
         }
     }
 
     async function endConversation() {
-        isRecording = false;
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-            mediaRecorder.stop();
+        // Ensure recording is stopped
+        if (mediaRecorder && isRecording) {
+            isRecording = false;
+            try { mediaRecorder.stop(); } catch {}
         }
-        if (mediaStream) {
-            mediaStream.getTracks().forEach(track => track.stop());
-        }
+        if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
 
         setUIState('processing');
         updateStatus('Ending conversation...', 'info');
@@ -142,11 +173,16 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const data = await resp.json();
             if (data.error) throw new Error(data.error);
-            appendMessage('ai', data.llm_response);
-            playAudio(data.audioUrl, () => {
+            appendMessage('ai', data.llm_response || 'Goodbye.');
+            if (data.audioUrl) {
+                playAudio(data.audioUrl, () => {
+                    updateStatus('Conversation ended. Click mic to start again.');
+                    setUIState('idle');
+                });
+            } else {
                 updateStatus('Conversation ended. Click mic to start again.');
                 setUIState('idle');
-            });
+            }
         } catch (err) {
             console.error('End convo error:', err);
             updateStatus('❌ Failed to end conversation gracefully.', 'error');
@@ -154,6 +190,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Single toggle button behavior
     recordBtn.addEventListener('click', () => {
         if (isRecording) {
             stopRecording();
