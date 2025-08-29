@@ -55,7 +55,7 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "a_super_secret_key")
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
-    async_mode="gevent_websocket",
+     async_mode='gevent',
     logger=False,
     engineio_logger=False
 )
