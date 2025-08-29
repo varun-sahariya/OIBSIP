@@ -2,6 +2,8 @@
 # FINAL VERSION: app.py
 # Enhanced with better debugging and error handling
 # ===============================================================
+import gevent.monkey
+gevent.monkey.patch_all()
 
 import os
 import json
@@ -261,11 +263,12 @@ def initialize_client_services(sid):
 
         client = StreamingClient(StreamingClientOptions(api_key=ASSEMBLYAI_API_KEY))
         
-        client.on(StreamingEvents.Open, on_open)
-        client.on(StreamingEvents.Transcript, on_transcript)
-        client.on(StreamingEvents.Turn, on_turn)
-        client.on(StreamingEvents.Error, on_error)
-        client.on(StreamingEvents.Close, on_close)
+        # --- THIS IS THE FIX ---
+        client.on(StreamingEvents.OPEN, on_open)
+        client.on(StreamingEvents.TRANSCRIPT, on_transcript)
+        client.on(StreamingEvents.TURN, on_turn)
+        client.on(StreamingEvents.ERROR, on_error)
+        client.on(StreamingEvents.CLOSE, on_close)
         
         clients[sid]["client"] = client
         socketio.start_background_task(transcribe_task, sid)
