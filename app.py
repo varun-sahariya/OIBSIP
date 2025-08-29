@@ -250,6 +250,7 @@ def handle_persona_change(data):
 @socketio.on("stream")
 def handle_stream(data):
     sid = request.sid
+    logging.info(f"--- 🎤 Received audio chunk for SID {sid} ---")
     if sid in clients and clients[sid].get("audio_queue"):
         clients[sid]["audio_queue"].put(data)
 
