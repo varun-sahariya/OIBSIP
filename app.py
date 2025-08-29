@@ -209,7 +209,26 @@ def initialize_client_services(sid):
                 logging.info(f"🔚 End of turn for {sid}: '{event.transcript}'")
                 socketio.emit("turn_ended", {"final_transcript": event.transcript}, room=sid)
                 socketio.start_background_task(process_llm_and_murf, event.transcript, sid)
-        
+        def on_error(self, error: aai.RealtimeError):
+            """Handles stream errors from AssemblyAI."""
+            logging.error(f"❌ AssemblyAI stream error for {sid}: {error}")
+            # Optionally, you can also notify the user on the frontend
+            socketio.emit("transcription_error", {"error": str(error)}, room=sid)
+        # =============================================================
+
+        client = StreamingClient(StreamingClientOptions(api_key=ASSEMBLYAI_API_KEY))
+        client.on(StreamingEvents.Turn, on_turn)
+
+        # =================== AND ADD THIS NEW LINE ===================
+        client.on(StreamingEvents.Error, on_error)
+        # =============================================================
+
+        clients[sid]["client"] = client
+        socketio.start_background_task(transcribe_task, sid)
+        logging.info(f"AssemblyAI services initialized for SID {sid}")
+    except Exception as e:
+        logging.error(f"Failed to initialize AssemblyAI for {sid}: {e}")
+        socketio.emit("config_error", {"message": f"Invalid AssemblyAI API key or configuration issue."}, room=sid)
         client = StreamingClient(StreamingClientOptions(api_key=ASSEMBLYAI_API_KEY))
         client.on(StreamingEvents.Turn, on_turn)
         # Add other handlers like on_error, on_open if needed
