@@ -1,10 +1,3 @@
-# ===============================================================
-# FINAL VERSION: app.py
-# Switched from eventlet to gevent for stability
-# ===============================================================
-
-# NOTE: The 'import eventlet' and 'eventlet.monkey_patch()' lines have been removed.
-
 import os
 import json
 import logging
@@ -24,7 +17,6 @@ from flask_socketio import SocketIO
 from assemblyai.streaming.v3 import (
     StreamingClient,
     StreamingEvents,
-    StreamingParameters,
     StreamingClientOptions,
 )
 import google.generativeai as genai
@@ -51,11 +43,10 @@ HAS_DEFAULT_KEYS = all([DEFAULT_API_KEYS["assemblyai"], DEFAULT_API_KEYS["gemini
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "a_super_secret_key")
 
-# NOTE: Switched async_mode from "eventlet" to "gevent_websocket"
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
-     async_mode='gevent',
+    async_mode='gevent',
     logger=False,
     engineio_logger=False
 )
@@ -105,9 +96,6 @@ def get_latest_news(topic: str, gnews_api_key: str) -> str:
         return f"No recent headlines found for '{topic}'."
     except Exception as e: return f"Error fetching news: {e}"
 
-# NOTE: These two functions might fail because they are called in a background task
-# without a request context. This can be fixed later if needed by switching to
-# manual function calling. For now, we are focusing on getting the deployment to run.
 def add_todo(item: str) -> str:
     sid = getattr(request, 'sid', None)
     if sid and sid in clients:
@@ -204,22 +192,33 @@ def initialize_client_services(sid):
         return
 
     try:
-        def on_turn(self, event):
-            if event.end_of_turn and event.transcript.strip():
-                logging.info(f"🔚 End of turn for {sid}: '{event.transcript}'")
+        # --- DEFINE EVENT HANDLERS FIRST ---
+        def on_partial_transcript(event):
+            if event.transcript:
+                # THIS IS THE CRUCIAL FIX!
+                socketio.emit("turn_detected", {"transcript": event.transcript}, room=sid)
+        
+        def on_final_transcript(event):
+            if event.transcript.strip():
+                logging.info(f"🔚 Final transcript for {sid}: '{event.transcript}'")
                 socketio.emit("turn_ended", {"final_transcript": event.transcript}, room=sid)
                 socketio.start_background_task(process_llm_and_murf, event.transcript, sid)
-        
+
+        # --- CREATE AND CONFIGURE THE CLIENT ---
         client = StreamingClient(StreamingClientOptions(api_key=ASSEMBLYAI_API_KEY))
-        client.on(StreamingEvents.Turn, on_turn)
-        # Add other handlers like on_error, on_open if needed
+        
+        # Use the more specific events for clarity
+        client.on(StreamingEvents.PartialTranscript, on_partial_transcript)
+        client.on(StreamingEvents.FinalTranscript, on_final_transcript)
         
         clients[sid]["client"] = client
         socketio.start_background_task(transcribe_task, sid)
         logging.info(f"AssemblyAI services initialized for SID {sid}")
+
     except Exception as e:
         logging.error(f"Failed to initialize AssemblyAI for {sid}: {e}")
         socketio.emit("config_error", {"message": f"Invalid AssemblyAI API key or configuration issue."}, room=sid)
+
 
 @socketio.on("connect")
 def handle_connect():
