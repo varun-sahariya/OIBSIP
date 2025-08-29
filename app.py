@@ -335,7 +335,16 @@ def handle_disconnect():
 @app.route("/")
 def index():
     return render_template("index.html")
-
+@app.route("/test-connection")
+def test_connection():
+    try:
+        logging.info("--- 🧪 Starting network test... ---")
+        response = requests.get("https://www.google.com", timeout=10)
+        logging.info(f"--- ✅ Network test SUCCESSFUL. Status code: {response.status_code} ---")
+        return "Connection to Google was successful!"
+    except Exception as e:
+        logging.error(f"--- 💥 Network test FAILED. Error: {e} ---")
+        return f"Connection to Google failed: {e}", 500
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
     socketio.run(app, host='0.0.0.0', port=port)
