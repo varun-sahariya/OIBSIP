@@ -1,3 +1,8 @@
+import eventlet
+eventlet.monkey_patch()
+
+# All your other imports like 'import os', 'from flask import Flask'
+# must come AFTER these two lines.
 import os
 import json
 import logging
