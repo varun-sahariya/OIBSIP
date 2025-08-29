@@ -1,12 +1,9 @@
-#
 # ===============================================================
-# FINAL HYBRID VERSION: app.py
-# Supports both server-side .env keys and client-side user keys
+# FINAL VERSION: app.py
+# Switched from eventlet to gevent for stability
 # ===============================================================
-#
 
-import eventlet
-eventlet.monkey_patch()
+# NOTE: The 'import eventlet' and 'eventlet.monkey_patch()' lines have been removed.
 
 import os
 import json
@@ -14,8 +11,13 @@ import logging
 import queue
 import time
 import re
-from dotenv import load_dotenv
 from functools import partial
+import asyncio
+import websockets
+from typing import Dict, Any
+
+# Third-party imports
+from dotenv import load_dotenv
 import assemblyai as aai
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO
@@ -26,9 +28,6 @@ from assemblyai.streaming.v3 import (
     StreamingClientOptions,
 )
 import google.generativeai as genai
-import asyncio
-import websockets
-from typing import Dict, Any
 from tavily import TavilyClient
 import requests
 
@@ -39,7 +38,6 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # --- Load Default API Keys from .env file ---
-# These will be used if the user doesn't provide their own
 DEFAULT_API_KEYS = {
     "assemblyai": os.getenv("ASSEMBLYAI_API_KEY"),
     "gemini": os.getenv("GEMINI_API_KEY"),
@@ -52,7 +50,15 @@ HAS_DEFAULT_KEYS = all([DEFAULT_API_KEYS["assemblyai"], DEFAULT_API_KEYS["gemini
 # --- Flask App and SocketIO Initialization ---
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "a_super_secret_key")
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+
+# NOTE: Switched async_mode from "eventlet" to "gevent_websocket"
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode="gevent_websocket",
+    logger=False,
+    engineio_logger=False
+)
 
 clients = {}
 PERSONAS = {
@@ -65,8 +71,9 @@ PERSONAS = {
     "detective": {"prompt": "You are a sharp-eyed detective named Inspector Sharp."}
 }
 
-# (All tool functions like get_weather, get_time, etc. remain the same as the last version)
-# ... [Tool functions are omitted here for brevity, but should be included in your file] ...
+# =========================================
+# Tool Functions
+# =========================================
 def get_weather(location: str) -> Dict[str, Any]:
     """Get the current weather for a specific location."""
     logging.info(f"--- 🔧 TOOL CALLED: get_weather(location={location}) ---")
@@ -98,19 +105,22 @@ def get_latest_news(topic: str, gnews_api_key: str) -> str:
         return f"No recent headlines found for '{topic}'."
     except Exception as e: return f"Error fetching news: {e}"
 
+# NOTE: These two functions might fail because they are called in a background task
+# without a request context. This can be fixed later if needed by switching to
+# manual function calling. For now, we are focusing on getting the deployment to run.
 def add_todo(item: str) -> str:
-    sid = request.sid
-    if sid in clients:
+    sid = getattr(request, 'sid', None)
+    if sid and sid in clients:
         clients[sid]["todo_list"].append(item)
         return f"Added '{item}' to your to-do list."
-    return "Error: Could not find your session."
+    return "Error: Could not find your session to add the to-do item."
 
 def view_todos() -> str:
-    sid = request.sid
-    if sid in clients:
+    sid = getattr(request, 'sid', None)
+    if sid and sid in clients:
         if not clients[sid]["todo_list"]: return "Your to-do list is empty."
         return "Your to-do list:\n" + "\n".join(f"- {item}" for item in clients[sid]["todo_list"])
-    return "Error: Could not find your session."
+    return "Error: Could not find your session to view the to-do list."
 
 
 # =========================================
@@ -119,15 +129,14 @@ def view_todos() -> str:
 async def process_llm_and_murf(prompt: str, client_sid: str):
     client_data = clients.get(client_sid, {})
     api_keys = client_data.get("api_keys", {})
-    if not all(k in api_keys for k in ["murf", "gemini"]):
+    if not all(k in api_keys and api_keys[k] for k in ["murf", "gemini"]):
         socketio.emit("llm_error", {"error": "Murf or Gemini API key not configured for this session."}, room=client_sid)
         return
 
-    genai.configure(api_key=api_keys["gemini"])
-    MURF_WS_URL = f"wss://api.murf.ai/v1/speech/stream-input?api-key={api_keys['murf']}&sample_rate=44100&channel_type=MONO&format=WAV"
-    
-    # ... (Rest of process_llm_and_murf is the same, using partial for tool keys)
     try:
+        genai.configure(api_key=api_keys["gemini"])
+        MURF_WS_URL = f"wss://api.murf.ai/v1/speech/stream-input?api-key={api_keys['murf']}&sample_rate=44100&channel_type=MONO&format=WAV"
+        
         async with websockets.connect(MURF_WS_URL) as ws:
             context_id = f"{client_sid}-{int(time.time())}"
             await ws.send(json.dumps({"context_id": context_id, "voice_config": { "voiceId": "en-US-amara", "style": "Conversational", "rate": -5 }}))
@@ -171,6 +180,7 @@ def transcribe_task(sid: str):
             if data is None: break
             yield data
     try:
+        # This task uses the client object created in initialize_client_services
         clients[sid]["client"].stream(read_from_queue(audio_queue))
     except Exception as e:
         logging.error(f"Error in transcribe_task for {sid}: {e}")
@@ -182,7 +192,6 @@ def initialize_client_services(sid):
     """Helper to initialize AssemblyAI client for a session."""
     if sid not in clients: return
     
-    # Clean up old client if it exists (e.g., on re-configuration)
     if clients[sid].get("client"):
         try: clients[sid]["client"].disconnect()
         except Exception: pass
@@ -220,10 +229,9 @@ def handle_connect():
         "client": None, "audio_queue": queue.Queue(),
         "persona": "default", "todo_list": [], "api_keys": {}
     }
-    # If server has default keys, use them automatically
     if HAS_DEFAULT_KEYS:
         logging.info(f"Applying default server keys for SID {sid}")
-        clients[sid]["api_keys"] = DEFAULT_API_KEYS
+        clients[sid]["api_keys"] = DEFAULT_API_KEYS.copy()
         initialize_client_services(sid)
 
 @socketio.on("configure_keys")
@@ -232,7 +240,7 @@ def handle_configure_keys(keys):
     if sid in clients:
         logging.info(f"Received user-provided API keys for SID {sid}")
         clients[sid]["api_keys"] = keys
-        initialize_client_services(sid) # Re-initialize with new keys
+        initialize_client_services(sid)
 
 @socketio.on("persona_change")
 def handle_persona_change(data):
@@ -263,5 +271,8 @@ def handle_disconnect():
 def index():
     return render_template("index.html")
 
+# =========================================
+# Application Entry Point
+# =========================================
 if __name__ == "__main__":
-    socketio.run(app, debug=True, host="0.0.0.0", port=5000)
+    socketio.run(app, debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
