@@ -162,6 +162,9 @@ threading.Thread(target=run_async_loop, args=(async_loop,), daemon=True).start()
 # =========================================
 # Murf TTS & Gemini Logic (unchanged logic)
 # =========================================
+from concurrent.futures import ThreadPoolExecutor
+executor = ThreadPoolExecutor()
+
 async def process_llm_and_murf(prompt: str, client_sid: str):
     logging.info(f"--- [TURN START] SID: {client_sid} ---")
     MURF_WS_URL = "wss://api.murf.ai/v1/speech/stream-input"
@@ -173,7 +176,7 @@ async def process_llm_and_murf(prompt: str, client_sid: str):
             logging.info(f"Murf WebSocket connection SUCCESSFUL for SID {client_sid}.")
             await ws.send(json.dumps({
                 "context_id": context_id,
-                "voice_config": { "voiceId": "en-US-amara", "style": "Conversational", "rate": -5 }
+                "voice_config": {"voiceId": "en-US-amara", "style": "Conversational", "rate": -5}
             }))
 
             async def receive_audio(websocket):
@@ -186,47 +189,63 @@ async def process_llm_and_murf(prompt: str, client_sid: str):
                             break
                 except Exception as e:
                     logging.error(f"RECEIVER TASK: Error: {e}")
-            
+
             receiver_task = asyncio.create_task(receive_audio(ws))
 
             try:
+                # Persona setup
                 current_persona_key = clients.get(client_sid, {}).get('persona', 'default')
                 persona_prompt = PERSONAS.get(current_persona_key, PERSONAS['default'])["prompt"]
-                
-                # The tools list is simple again, as function signatures match what the model expects
-                tools = [
-                    get_weather, 
-                    get_time, 
-                    perform_search, 
-                    get_latest_news,
-                    add_todo,
-                    view_todos
-                ]
+
+                tools = [get_weather, get_time, perform_search, get_latest_news, add_todo, view_todos]
 
                 model = genai.GenerativeModel(
                     'gemini-1.5-flash',
                     system_instruction=persona_prompt,
                     tools=tools
                 )
-                
+
                 chat = model.start_chat(enable_automatic_function_calling=True)
 
-                logging.info("--> Calling Gemini API...")
-                response = await chat.send_message_async(prompt)
-                logging.info("<-- Gemini API call complete.") # We probably won't see this line
+                logging.info("--> Calling Gemini API (threaded)...")
+
+                # Run Gemini call in a thread (so eventlet doesn’t block)
+                loop = asyncio.get_event_loop()
+
+                def call_gemini_sync():
+                    try:
+                        return chat.send_message(prompt)
+                    except Exception as e:
+                        logging.error(f"❌ Gemini sync call failed: {e}", exc_info=True)
+                        return None
+
+                try:
+                    response = await asyncio.wait_for(
+                        loop.run_in_executor(executor, call_gemini_sync),
+                        timeout=20
+                    )
+                except asyncio.TimeoutError:
+                    logging.error("⏳ Gemini call timed out")
+                    response = None
+
+                if not response:
+                    raise RuntimeError("No response from Gemini")
+
+                logging.info("<-- Gemini API call complete.")
                 final_text = response.text
                 logging.info(f"Gemini final response: '{final_text}'")
 
+                # Split response into sentences
                 sentences = re.split(r'(?<=[.?!])\s+', final_text)
-                sentences = [sentence.strip() for sentence in sentences if sentence.strip()]
+                sentences = [s.strip() for s in sentences if s.strip()]
 
                 for sentence in sentences:
                     text_to_send = sentence + " "
                     socketio.emit("llm_chunk", {"text": text_to_send}, room=client_sid)
-                    await ws.send(json.dumps({ "context_id": context_id, "text": text_to_send }))
+                    await ws.send(json.dumps({"context_id": context_id, "text": text_to_send}))
                     await asyncio.sleep(0.2)
 
-                await ws.send(json.dumps({ "context_id": context_id, "end": True }))
+                await ws.send(json.dumps({"context_id": context_id, "end": True}))
                 await asyncio.wait_for(receiver_task, timeout=20.0)
                 socketio.emit("llm_complete", room=client_sid)
                 logging.info(f"--- [TURN COMPLETE] SID: {client_sid} ---")
@@ -235,13 +254,14 @@ async def process_llm_and_murf(prompt: str, client_sid: str):
                 logging.error(f"Error in Gemini processing: {e}", exc_info=True)
                 error_msg = "I apologize, but I encountered an error. Please try again."
                 socketio.emit("llm_chunk", {"text": error_msg}, room=client_sid)
-                await ws.send(json.dumps({ "context_id": context_id, "text": error_msg }))
-                await ws.send(json.dumps({ "context_id": context_id, "end": True }))
+                await ws.send(json.dumps({"context_id": context_id, "text": error_msg}))
+                await ws.send(json.dumps({"context_id": context_id, "end": True}))
                 socketio.emit("llm_complete", room=client_sid)
 
     except Exception as e:
         logging.error(f"❌ An error occurred in process_llm_and_murf: {e}", exc_info=True)
         socketio.emit("llm_error", {"error": str(e)}, room=client_sid)
+
 
 # =========================================
 # Wrapper & Other Functions (unchanged)
