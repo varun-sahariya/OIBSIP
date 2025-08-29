@@ -210,8 +210,10 @@ async def process_llm_and_murf(prompt: str, client_sid: str):
                 )
                 
                 chat = model.start_chat(enable_automatic_function_calling=True)
-                
+
+                logging.info("--> Calling Gemini API...")
                 response = await chat.send_message_async(prompt)
+                logging.info("<-- Gemini API call complete.") # We probably won't see this line
                 final_text = response.text
                 logging.info(f"Gemini final response: '{final_text}'")
 
