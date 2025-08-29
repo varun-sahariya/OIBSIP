@@ -9,7 +9,6 @@ import asyncio
 import websockets
 from typing import Dict, Any
 
-# Third-party imports
 from dotenv import load_dotenv
 import assemblyai as aai
 from flask import Flask, render_template, request
@@ -29,17 +28,6 @@ import requests
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# --- Load Default API Keys from .env file ---
-DEFAULT_API_KEYS = {
-    "assemblyai": os.getenv("ASSEMBLYAI_API_KEY"),
-    "gemini": os.getenv("GEMINI_API_KEY"),
-    "murf": os.getenv("MURF_API_KEY"),
-    "tavily": os.getenv("TAVILY_API_KEY"),
-    "gnews": os.getenv("GNEWS_API_KEY"),
-}
-HAS_DEFAULT_KEYS = all([DEFAULT_API_KEYS["assemblyai"], DEFAULT_API_KEYS["gemini"], DEFAULT_API_KEYS["murf"]])
-
-# --- Flask App and SocketIO Initialization ---
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "a_super_secret_key")
 
@@ -65,20 +53,18 @@ PERSONAS = {
 # =========================================
 # Tool Functions
 # =========================================
+# (These functions remain unchanged, they are correct)
 def get_weather(location: str) -> Dict[str, Any]:
-    """Get the current weather for a specific location."""
     logging.info(f"--- 🔧 TOOL CALLED: get_weather(location={location}) ---")
     if "agra" in location.lower(): return {"location": "Agra", "temperature": 34, "unit": "celsius", "description": "Hot and sunny"}
     elif "delhi" in location.lower(): return {"location": "Delhi", "temperature": 36, "unit": "celsius", "description": "Very hot and humid"}
     else: return {"location": location, "temperature": "unknown", "description": "Weather data not available"}
 
 def get_time() -> str:
-    """Get the current time."""
     logging.info("--- 🔧 TOOL CALLED: get_time() ---")
     return f"The current time is {time.strftime('%I:%M %p', time.localtime())}."
 
 def perform_search(query: str, tavily_api_key: str) -> str:
-    """Performs a web search using the Tavily API."""
     if not tavily_api_key: return "Tavily API key not provided for this session."
     try:
         tavily_client = TavilyClient(api_key=tavily_api_key)
@@ -87,7 +73,6 @@ def perform_search(query: str, tavily_api_key: str) -> str:
     except Exception as e: return f"An error occurred during search: {e}"
 
 def get_latest_news(topic: str, gnews_api_key: str) -> str:
-    """Fetches the latest news headlines on a specific topic."""
     if not gnews_api_key: return "GNews API key not provided for this session."
     url = f"https://gnews.io/api/v4/top-headlines?q={topic}&lang=en&country=in&max=3&apikey={gnews_api_key}"
     try:
@@ -155,7 +140,7 @@ async def process_llm_and_murf(prompt: str, client_sid: str):
             await asyncio.wait_for(receiver_task, timeout=20.0)
             socketio.emit("llm_complete", room=client_sid)
     except Exception as e:
-        logging.error(f"Error in LLM/Murf process: {e}", exc_info=True)
+        logging.error(f"Error in LLM/Murf process for {client_sid}: {e}", exc_info=True)
         socketio.emit("llm_error", {"error": str(e)}, room=client_sid)
 
 
@@ -168,16 +153,15 @@ def transcribe_task(sid: str):
             if data is None: break
             yield data
     try:
-        # This task uses the client object created in initialize_client_services
         clients[sid]["client"].stream(read_from_queue(audio_queue))
     except Exception as e:
-        logging.error(f"Error in transcribe_task for {sid}: {e}")
+        logging.error(f"Error in transcribe_task for {sid}: {e}", exc_info=True)
 
 # =========================================
 # SocketIO Event Handlers
 # =========================================
 def initialize_client_services(sid):
-    """Helper to initialize AssemblyAI client for a session."""
+    """Initializes AssemblyAI services for a client AFTER they provide keys."""
     if sid not in clients: return
     
     if clients[sid].get("client"):
@@ -192,10 +176,8 @@ def initialize_client_services(sid):
         return
 
     try:
-        # --- DEFINE EVENT HANDLERS FIRST ---
         def on_partial_transcript(event):
             if event.transcript:
-                # THIS IS THE CRUCIAL FIX!
                 socketio.emit("turn_detected", {"transcript": event.transcript}, room=sid)
         
         def on_final_transcript(event):
@@ -203,35 +185,32 @@ def initialize_client_services(sid):
                 logging.info(f"🔚 Final transcript for {sid}: '{event.transcript}'")
                 socketio.emit("turn_ended", {"final_transcript": event.transcript}, room=sid)
                 socketio.start_background_task(process_llm_and_murf, event.transcript, sid)
-
-        # --- CREATE AND CONFIGURE THE CLIENT ---
-        client = StreamingClient(StreamingClientOptions(api_key=ASSEMBLYAI_API_KEY))
         
-        # Use the more specific events for clarity
+        def on_error(error: Exception):
+            logging.error(f"AssemblyAI Stream Error for {sid}: {error}", exc_info=True)
+
+        client = StreamingClient(StreamingClientOptions(api_key=ASSEMBLYAI_API_KEY))
         client.on(StreamingEvents.PartialTranscript, on_partial_transcript)
         client.on(StreamingEvents.FinalTranscript, on_final_transcript)
+        client.on(StreamingEvents.Error, on_error)
         
         clients[sid]["client"] = client
         socketio.start_background_task(transcribe_task, sid)
-        logging.info(f"AssemblyAI services initialized for SID {sid}")
+        logging.info(f"AssemblyAI services initialized successfully for SID {sid}")
 
     except Exception as e:
-        logging.error(f"Failed to initialize AssemblyAI for {sid}: {e}")
+        logging.error(f"Failed to initialize AssemblyAI for {sid}: {e}", exc_info=True)
         socketio.emit("config_error", {"message": f"Invalid AssemblyAI API key or configuration issue."}, room=sid)
-
 
 @socketio.on("connect")
 def handle_connect():
     sid = request.sid
     logging.info(f"Client connected: {sid}")
+    # CRITICAL FIX: DO NOT apply default keys. Wait for user to provide them.
     clients[sid] = {
         "client": None, "audio_queue": queue.Queue(),
         "persona": "default", "todo_list": [], "api_keys": {}
     }
-    if HAS_DEFAULT_KEYS:
-        logging.info(f"Applying default server keys for SID {sid}")
-        clients[sid]["api_keys"] = DEFAULT_API_KEYS.copy()
-        initialize_client_services(sid)
 
 @socketio.on("configure_keys")
 def handle_configure_keys(keys):
@@ -249,7 +228,7 @@ def handle_persona_change(data):
 @socketio.on("stream")
 def handle_stream(data):
     sid = request.sid
-    if sid in clients and clients[sid].get("audio_queue"):
+    if sid in clients and "audio_queue" in clients[sid]:
         clients[sid]["audio_queue"].put(data)
 
 @socketio.on("disconnect")
@@ -275,3 +254,4 @@ def index():
 # =========================================
 if __name__ == "__main__":
     socketio.run(app, debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
