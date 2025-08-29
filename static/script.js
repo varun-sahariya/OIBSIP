@@ -44,7 +44,7 @@ class VoiceAssistantPro {
         this.murfKeyInput = document.getElementById('murfKey');
         this.tavilyKeyInput = document.getElementById('tavilyKey');
         this.gnewsKeyInput = document.getElementById('gnewsKey');
-        // NEW: Get the Clear Keys button
+        // Get the Clear Keys button
         this.clearKeysBtn = document.getElementById('clearKeysBtn');
     }
 
@@ -61,11 +61,11 @@ class VoiceAssistantPro {
         this.configOverlay.addEventListener('click', (e) => {
             if (e.target === this.configOverlay) this.closeConfigModal();
         });
-        // NEW: Add event listener for the Clear Keys button
+        // Add event listener for the Clear Keys button
         this.clearKeysBtn.addEventListener('click', () => this.handleClearKeys());
     }
 
-    // NEW: Function to handle clearing keys
+    // Function to handle clearing keys
     handleClearKeys() {
         localStorage.removeItem('voiceAssistantKeys');
         alert('API keys have been cleared. The application will now reload.');
@@ -369,4 +369,3 @@ class VoiceAssistantPro {
     }
 }
 document.addEventListener('DOMContentLoaded', () => { new VoiceAssistantPro(); });
-

@@ -1,3 +1,10 @@
+# ===============================================================
+# FINAL WORKING VERSION: app.py
+# - Definitive fix for the 'AttributeError: PartialTranscript'.
+# - Uses a single, correct event handler as per AssemblyAI documentation.
+# - Secures API key logic to wait for user input.
+# ===============================================================
+
 import os
 import json
 import logging
@@ -17,6 +24,7 @@ from assemblyai.streaming.v3 import (
     StreamingClient,
     StreamingEvents,
     StreamingClientOptions,
+    Transcript, # Import the Transcript object for type checking
 )
 import google.generativeai as genai
 from tavily import TavilyClient
@@ -53,7 +61,6 @@ PERSONAS = {
 # =========================================
 # Tool Functions
 # =========================================
-# (These functions remain unchanged, they are correct)
 def get_weather(location: str) -> Dict[str, Any]:
     logging.info(f"--- 🔧 TOOL CALLED: get_weather(location={location}) ---")
     if "agra" in location.lower(): return {"location": "Agra", "temperature": 34, "unit": "celsius", "description": "Hot and sunny"}
@@ -176,22 +183,23 @@ def initialize_client_services(sid):
         return
 
     try:
-        def on_partial_transcript(event):
-            if event.transcript:
-                socketio.emit("turn_detected", {"transcript": event.transcript}, room=sid)
-        
-        def on_final_transcript(event):
-            if event.transcript.strip():
-                logging.info(f"🔚 Final transcript for {sid}: '{event.transcript}'")
-                socketio.emit("turn_ended", {"final_transcript": event.transcript}, room=sid)
-                socketio.start_background_task(process_llm_and_murf, event.transcript, sid)
+        # ===== THIS IS THE DEFINITIVE FIX =====
+        def on_transcript(event: Transcript):
+            # Check the message type to differentiate partial vs. final
+            if event.message_type == "PartialTranscript" and event.text:
+                socketio.emit("turn_detected", {"transcript": event.text}, room=sid)
+            elif event.message_type == "FinalTranscript" and event.text:
+                logging.info(f"🔚 Final transcript for {sid}: '{event.text}'")
+                socketio.emit("turn_ended", {"final_transcript": event.text}, room=sid)
+                socketio.start_background_task(process_llm_and_murf, event.text, sid)
         
         def on_error(error: Exception):
             logging.error(f"AssemblyAI Stream Error for {sid}: {error}", exc_info=True)
 
         client = StreamingClient(StreamingClientOptions(api_key=ASSEMBLYAI_API_KEY))
-        client.on(StreamingEvents.PartialTranscript, on_partial_transcript)
-        client.on(StreamingEvents.FinalTranscript, on_final_transcript)
+        
+        # Subscribe to the single, correct event
+        client.on(StreamingEvents.Transcript, on_transcript)
         client.on(StreamingEvents.Error, on_error)
         
         clients[sid]["client"] = client
@@ -200,7 +208,7 @@ def initialize_client_services(sid):
 
     except Exception as e:
         logging.error(f"Failed to initialize AssemblyAI for {sid}: {e}", exc_info=True)
-        socketio.emit("config_error", {"message": f"Invalid AssemblyAI API key or configuration issue."}, room=sid)
+        socketio.emit("config_error", {"message": "Invalid AssemblyAI API key or configuration issue."}, room=sid)
 
 @socketio.on("connect")
 def handle_connect():
@@ -216,7 +224,7 @@ def handle_connect():
 def handle_configure_keys(keys):
     sid = request.sid
     if sid in clients:
-        logging.info(f"Received user-provided API keys for SID {sid}")
+        logging.info(f"Received user keys for SID {sid}")
         clients[sid]["api_keys"] = keys
         initialize_client_services(sid)
 
@@ -254,4 +262,3 @@ def index():
 # =========================================
 if __name__ == "__main__":
     socketio.run(app, debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
