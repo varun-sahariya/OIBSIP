@@ -14,6 +14,8 @@ class VoiceAssistantPro {
         this.currentPersona = 'default';
         this.apiKeys = {};
         this.isConfigured = false;
+        this.audioChunkCount = 0;
+        this.lastTranscript = '';
         
         this.initializeElements();
         this.setupEventListeners();
@@ -98,7 +100,8 @@ class VoiceAssistantPro {
                 this.openConfigModal();
             }
         } else {
-            this.openConfigModal();
+            // Try to connect anyway - server might have default keys
+            this.initializeSocket();
         }
     }
 
@@ -153,6 +156,7 @@ class VoiceAssistantPro {
     }
 
     initializeSocket() {
+        console.log('Initializing socket connection...');
         this.socket = io();
         
         this.socket.on('connect', () => {
@@ -160,8 +164,11 @@ class VoiceAssistantPro {
             this.updateConnectionStatus('Connected', true);
             this.updateStatus('Ready to chat!');
             
-            // Send API keys to server
-            this.socket.emit('configure_keys', this.apiKeys);
+            // Send API keys to server if we have them
+            if (this.isConfigured) {
+                console.log('Sending API keys to server...');
+                this.socket.emit('configure_keys', this.apiKeys);
+            }
             
             // Send persona
             this.socket.emit('persona_change', { persona: this.currentPersona });
@@ -173,19 +180,31 @@ class VoiceAssistantPro {
             this.updateStatus('Connection lost');
         });
         
+        // New enhanced event handlers
+        this.socket.on('transcript_partial', (data) => {
+            if (data.transcript) {
+                console.log('Partial transcript:', data.transcript);
+                this.updateStatus(`Listening: "${data.transcript}"`);
+            }
+        });
+        
         this.socket.on('turn_detected', (data) => {
             if (data.transcript && !data.end_of_turn) {
-                this.updateStatus(`💬 "${data.transcript}"`);
+                console.log('Turn detected:', data.transcript);
+                this.updateStatus(`Processing: "${data.transcript}"`);
                 this.micContainer.classList.add('processing');
+                this.lastTranscript = data.transcript;
             }
         });
         
         this.socket.on('turn_ended', (data) => {
             if (data.final_transcript) {
+                console.log('Turn ended:', data.final_transcript);
                 this.addMessage(data.final_transcript, 'user');
                 this.micContainer.classList.remove('processing');
                 this.showTyping();
                 this.stopAudio();
+                this.updateStatus('AI is thinking...');
             }
         });
         
@@ -208,11 +227,24 @@ class VoiceAssistantPro {
         
         this.socket.on('llm_complete', () => {
             this.hideTyping();
+            this.updateStatus(this.isRecording ? 'Listening...' : 'Ready to chat!');
         });
         
         this.socket.on('config_error', (data) => {
+            console.error('Config error:', data.message);
             alert(`Configuration Error: ${data.message}`);
             this.openConfigModal();
+        });
+        
+        this.socket.on('transcription_error', (data) => {
+            console.error('Transcription error:', data.error);
+            this.updateStatus('Transcription error occurred');
+        });
+        
+        this.socket.on('llm_error', (data) => {
+            console.error('LLM error:', data.error);
+            this.hideTyping();
+            this.updateStatus('AI processing error');
         });
     }
 
@@ -224,11 +256,12 @@ class VoiceAssistantPro {
     updateStatus(message, className = '') {
         this.statusDisplay.textContent = message;
         this.statusDisplay.className = `status-display ${className}`;
+        console.log('Status:', message);
     }
 
     async toggleRecording() {
-        if (!this.isConfigured) {
-            this.openConfigModal();
+        if (!this.socket || !this.socket.connected) {
+            this.updateStatus('Not connected to server');
             return;
         }
         
@@ -243,18 +276,45 @@ class VoiceAssistantPro {
         if (this.isRecording) return;
         
         try {
+            console.log('Starting recording...');
             this.stopAudio();
+            this.audioChunkCount = 0; // Reset chunk count
             
+            // Request microphone with specific constraints
             this.mediaStream = await navigator.mediaDevices.getUserMedia({ 
-                audio: { sampleRate: 16000, channelCount: 1 } 
+                audio: { 
+                    sampleRate: 16000, 
+                    channelCount: 1,
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                } 
             });
             
+            // Create audio context with 16kHz sample rate
             this.audioContext = new AudioContext({ sampleRate: 16000 });
+            console.log('Audio context sample rate:', this.audioContext.sampleRate);
             
+            // Create worklet for audio processing
             const workletBlob = new Blob([`
                 class PCMProcessor extends AudioWorkletProcessor {
+                    constructor() {
+                        super();
+                        this.bufferSize = 4096;
+                        this.buffer = [];
+                    }
+                    
                     process(inputs) {
-                        this.port.postMessage(inputs[0][0]);
+                        const input = inputs[0];
+                        if (input.length > 0 && input[0].length > 0) {
+                            // Add samples to buffer
+                            this.buffer.push(...input[0]);
+                            
+                            // Send buffer when it reaches desired size
+                            if (this.buffer.length >= this.bufferSize) {
+                                this.port.postMessage(this.buffer.splice(0, this.bufferSize));
+                            }
+                        }
                         return true;
                     }
                 }
@@ -264,23 +324,43 @@ class VoiceAssistantPro {
             const workletURL = URL.createObjectURL(workletBlob);
             await this.audioContext.audioWorklet.addModule(workletURL);
             
+            // Connect audio processing chain
             const mediaStreamSource = this.audioContext.createMediaStreamSource(this.mediaStream);
             this.workletNode = new AudioWorkletNode(this.audioContext, 'pcm-processor');
             
-            let audioBuffer = [];
+            // Connect the audio nodes
+            mediaStreamSource.connect(this.workletNode);
+            
+            // Enhanced audio processing with better error handling
             this.workletNode.port.onmessage = (event) => {
-                audioBuffer.push(...event.data);
-                if (audioBuffer.length >= 4096) {
-                    const pcm16Data = new Int16Array(audioBuffer.length);
-                    for (let i = 0; i < audioBuffer.length; i++) {
-                        pcm16Data[i] = Math.max(-1, Math.min(1, audioBuffer[i])) * 0x7FFF;
+                // *** FIX: Added the missing catch block ***
+                try {
+                    const inputData = event.data;
+                    if (!inputData || inputData.length === 0) return;
+                    
+                    // Convert Float32 samples to PCM16
+                    const pcm16Data = new Int16Array(inputData.length);
+                    for (let i = 0; i < inputData.length; i++) {
+                        // Clamp and convert to 16-bit PCM
+                        const sample = Math.max(-1, Math.min(1, inputData[i]));
+                        pcm16Data[i] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
                     }
-                    this.socket.emit('stream', pcm16Data.buffer);
-                    audioBuffer = [];
+                    
+                    // Send to server
+                    if (this.socket && this.socket.connected) {
+                        this.socket.emit('stream', pcm16Data.buffer);
+                        this.audioChunkCount++;
+                        
+                        // Debug log every 50 chunks
+                        if (this.audioChunkCount % 50 === 0) {
+                            console.log(`Sent ${this.audioChunkCount} audio chunks`);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error processing audio for streaming:', error);
                 }
             };
             
-            mediaStreamSource.connect(this.workletNode);
             this.isRecording = true;
             this.micContainer.classList.add('listening');
             this.updateStatus('🎙️ Listening...', 'listening');
@@ -288,13 +368,14 @@ class VoiceAssistantPro {
             
         } catch (error) {
             console.error('Error starting recording:', error);
-            this.updateStatus('❌ Microphone access denied');
+            this.updateStatus(`❌ Mic Error: ${error.message}`);
         }
     }
 
     stopRecording() {
         if (!this.isRecording) return;
         
+        console.log('Stopping recording...');
         this.isRecording = false;
         if (this.mediaStream) {
             this.mediaStream.getTracks().forEach(track => track.stop());
@@ -325,7 +406,7 @@ class VoiceAssistantPro {
         
         this.personaPreview.textContent = personas[this.currentPersona];
         
-        if (this.socket) {
+        if (this.socket && this.socket.connected) {
             this.socket.emit('persona_change', { persona: this.currentPersona });
         }
     }
@@ -369,7 +450,7 @@ class VoiceAssistantPro {
 
     updateAssistantMessage(text) {
         let lastMessage = this.chatHistory.querySelector('.message.assistant:last-child .message-content');
-        if (!lastMessage) {
+        if (!lastMessage || lastMessage.parentElement.dataset.complete === 'true') {
             this.addMessage('', 'assistant');
             lastMessage = this.chatHistory.querySelector('.message.assistant:last-child .message-content');
         }
