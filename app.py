@@ -1,5 +1,5 @@
 import eventlet
-eventlet.monkey_patch()
+eventlet.monkey_patch(socket=True, dns=True)
 
 # All your other imports like 'import os', 'from flask import Flask'
 # must come AFTER these two lines.
