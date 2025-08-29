@@ -74,7 +74,7 @@
             50% { background-position: 100% 50%; }
         }
 
-        /* API Configuration Modal (CSS remains for future use) */
+        /* API Configuration Modal */
         .config-overlay {
             position: fixed;
             top: 0;
@@ -98,6 +98,8 @@
             max-width: 600px;
             border: 1px solid rgba(255, 255, 255, 0.3);
             box-shadow: 0 30px 60px rgba(0, 0, 0, 0.3);
+            max-height: 80vh;
+            overflow-y: auto;
         }
 
         .config-header {
@@ -160,6 +162,131 @@
         }
         .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf50; animation: pulse 2s infinite; }
         .status-dot.disconnected { background: #f44336; }
+
+        /* Skills Section */
+        .skills-section {
+            margin-bottom: 25px; background: rgba(255, 255, 255, 0.08);
+            border-radius: 16px; padding: 20px; border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        .skills-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            cursor: pointer;
+        }
+
+        .skills-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .skills-toggle {
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.3s ease;
+        }
+
+        .skills-toggle.expanded {
+            transform: rotate(180deg);
+        }
+
+        .skills-content {
+            display: none;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .skills-content.show {
+            display: grid;
+        }
+
+        .skill-card {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: visible;
+        }
+
+        .skill-card:hover {
+            background: rgba(255, 255, 255, 0.15);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .skill-icon {
+            font-size: 1.2rem;
+            margin-bottom: 6px;
+            display: block;
+        }
+
+        .skill-name {
+            font-size: 0.8rem;
+            font-weight: 500;
+            margin-bottom: 4px;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .skill-brief {
+            font-size: 0.7rem;
+            color: rgba(255, 255, 255, 0.6);
+            line-height: 1.2;
+        }
+
+        .skill-tooltip {
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            line-height: 1.3;
+            width: 200px;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+            margin-bottom: 8px;
+        }
+
+        .skill-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 6px solid transparent;
+            border-top-color: rgba(0, 0, 0, 0.9);
+        }
+
+        .skill-card:hover .skill-tooltip {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .tooltip-description {
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .tooltip-example {
+            color: rgba(255, 255, 255, 0.8);
+            font-style: italic;
+            font-size: 0.7rem;
+        }
 
         /* Persona selector */
         .persona-selector {
@@ -306,6 +433,7 @@
             .config-modal { margin: 20px; padding: 30px; }
             .mic-container { width: 120px; height: 120px; }
             .mic-button { width: 80px; height: 80px; font-size: 1.8rem; }
+            .skills-content { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -323,6 +451,69 @@
             <div class="status-indicator">
                 <div class="status-dot" id="connectionDot"></div>
                 <span id="connectionStatus">Connecting...</span>
+            </div>
+
+            <div class="skills-section">
+                <div class="skills-header" id="skillsHeader">
+                    <span class="skills-title">🛠️ Available Skills</span>
+                    <button class="skills-toggle" id="skillsToggle">▼</button>
+                </div>
+                <div class="skills-content" id="skillsContent">
+                    <div class="skill-card" data-skill="weather">
+                        <span class="skill-icon">🌤️</span>
+                        <div class="skill-name">Weather</div>
+                        <div class="skill-brief">Get current weather</div>
+                        <div class="skill-tooltip">
+                            <div class="tooltip-description">Get current weather information for any location</div>
+                            <div class="tooltip-example">Try: "What's the weather in Delhi?" or "How's the weather today?"</div>
+                        </div>
+                    </div>
+                    <div class="skill-card" data-skill="time">
+                        <span class="skill-icon">⏰</span>
+                        <div class="skill-name">Time</div>
+                        <div class="skill-brief">Get current time</div>
+                        <div class="skill-tooltip">
+                            <div class="tooltip-description">Get the current date and time</div>
+                            <div class="tooltip-example">Try: "What time is it?" or "Tell me the current date"</div>
+                        </div>
+                    </div>
+                    <div class="skill-card" data-skill="search">
+                        <span class="skill-icon">🔍</span>
+                        <div class="skill-name">Web Search</div>
+                        <div class="skill-brief">Search the web</div>
+                        <div class="skill-tooltip">
+                            <div class="tooltip-description">Perform web searches to find current information</div>
+                            <div class="tooltip-example">Try: "Search for latest AI news" or "Find information about quantum computing"</div>
+                        </div>
+                    </div>
+                    <div class="skill-card" data-skill="news">
+                        <span class="skill-icon">📰</span>
+                        <div class="skill-name">Latest News</div>
+                        <div class="skill-brief">Get news headlines</div>
+                        <div class="skill-tooltip">
+                            <div class="tooltip-description">Get the latest news headlines on specific topics</div>
+                            <div class="tooltip-example">Try: "Get news about technology" or "What's happening in sports?"</div>
+                        </div>
+                    </div>
+                    <div class="skill-card" data-skill="todo-add">
+                        <span class="skill-icon">➕</span>
+                        <div class="skill-name">Add Todo</div>
+                        <div class="skill-brief">Add task to list</div>
+                        <div class="skill-tooltip">
+                            <div class="tooltip-description">Add new items to your personal to-do list</div>
+                            <div class="tooltip-example">Try: "Add buy groceries to my todo list" or "Remind me to call mom"</div>
+                        </div>
+                    </div>
+                    <div class="skill-card" data-skill="todo-view">
+                        <span class="skill-icon">📋</span>
+                        <div class="skill-name">View Todos</div>
+                        <div class="skill-brief">See your tasks</div>
+                        <div class="skill-tooltip">
+                            <div class="tooltip-description">View all items currently on your to-do list</div>
+                            <div class="tooltip-example">Try: "Show my todo list" or "What's on my task list?"</div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="persona-selector">
@@ -425,6 +616,7 @@
         </div>
     </div>
     
-    <script src="/static/script.js" defer></script>
+    
+ <script src="/static/script.js" defer></script>
 </body>
 </html>
