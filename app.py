@@ -45,7 +45,7 @@ GNEWS_API_KEY = os.getenv("GNEWS_API_KEY") # Added for consistency
 # --- Error Handling for Missing Keys ---
 if not ASSEMBLYAI_API_KEY:
     raise Exception("ASSEMBLYAI_API_KEY environment variable not set in .env file")
-if not GOOGLE_API_KEY:
+if not GEMINI_API_KEY:
     raise Exception("GEMINI_API_KEY environment variable not set in .env file")
 if not MURF_API_KEY:
     raise Exception("MURF_API_KEY environment variable not set in .env file")
