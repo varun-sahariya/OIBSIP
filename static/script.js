@@ -1,479 +1,622 @@
-class VoiceAssistantPro {
-    constructor() {
-        this.socket = null;
-        this.isRecording = false;
-        this.mediaStream = null;
-        this.audioContext = null;
-        this.workletNode = null;
-        this.playbackContext = null;
-        this.gainNode = null;
-        this.audioQueue = [];
-        this.isProcessingQueue = false;
-        this.nextStartTime = 0;
-        this.activeSourceNodes = [];
-        this.currentPersona = 'default';
-        this.apiKeys = {};
-        this.isConfigured = false;
-        
-        this.initializeElements();
-        this.setupEventListeners();
-        this.checkStoredConfig(); // ✨ We'll use this to load keys from browser storage
-    }
+<!DOCTYPE html>
+<html lang="en">
 
-    initializeElements() {
-        // Config elements
-        this.configBtn = document.getElementById('configBtn');
-        this.helpBtn = document.getElementById('helpBtn');
-        this.configOverlay = document.getElementById('configOverlay');
-        this.closeConfigBtn = document.getElementById('closeConfigBtn');
-        this.cancelConfigBtn = document.getElementById('cancelConfigBtn');
-        this.configForm = document.getElementById('configForm');
-        
-        // Control elements
-        this.micBtn = document.getElementById('micBtn');
-        this.micContainer = document.getElementById('micContainer');
-        this.statusDisplay = document.getElementById('statusDisplay');
-        this.stopBtn = document.getElementById('stopBtn');
-        this.clearBtn = document.getElementById('clearBtn');
-        this.volumeSlider = document.getElementById('volumeSlider');
-        this.volumeDisplay = document.getElementById('volumeDisplay');
-        
-        // Chat elements
-        this.chatHistory = document.getElementById('chatHistory');
-        this.typingIndicator = document.getElementById('typingIndicator');
-        
-        // Status elements
-        this.connectionDot = document.getElementById('connectionDot');
-        this.connectionStatus = document.getElementById('connectionStatus');
-        
-        // Persona elements
-        this.personaSelect = document.getElementById('personaSelect');
-        this.personaPreview = document.getElementById('personaPreview');
-        
-        // API key inputs
-        this.assemblyaiKeyInput = document.getElementById('assemblyaiKey');
-        this.geminiKeyInput = document.getElementById('geminiKey');
-        this.murfKeyInput = document.getElementById('murfKey');
-        this.tavilyKeyInput = document.getElementById('tavilyKey');
-        this.gnewsKeyInput = document.getElementById('gnewsKey');
-    }
-
-    setupEventListeners() {
-        // Config modal events
-        this.configBtn.addEventListener('click', () => this.openConfigModal());
-        this.helpBtn.addEventListener('click', () => this.openConfigModal()); // Help button now opens config
-        this.closeConfigBtn.addEventListener('click', () => this.closeConfigModal());
-        this.cancelConfigBtn.addEventListener('click', () => this.closeConfigModal());
-        this.configForm.addEventListener('submit', (e) => this.handleConfigSubmit(e));
-        
-        // Control events
-        this.micBtn.addEventListener('click', () => this.toggleRecording());
-        this.stopBtn.addEventListener('click', () => this.stopRecording());
-        this.clearBtn.addEventListener('click', () => this.clearChat());
-        this.volumeSlider.addEventListener('input', (e) => this.updateVolume(e));
-        
-        // Persona events
-        this.personaSelect.addEventListener('change', (e) => this.changePersona(e));
-        
-        // Click outside modal to close
-        this.configOverlay.addEventListener('click', (e) => {
-            if (e.target === this.configOverlay) {
-                this.closeConfigModal();
-            }
-        });
-    }
-
-    checkStoredConfig() {
-        // This is still simplified because the backend handles keys, but it provides a better UI experience.
-        this.isConfigured = true;
-        this.initializeSocket();
-        this.updateStatus('Ready to Chat');
-        this.statusDisplay.textContent = 'Ready to Chat';
-        this.micContainer.classList.remove('processing');
-        document.querySelector('.conversation-subtitle').textContent = 'Click the mic and start speaking';
-        document.querySelector('.message-content').textContent = 'Welcome! Click the microphone in the sidebar to start our conversation.';
-
-        // ✨ Bonus: Load keys from localStorage into the form if they exist
-        this.assemblyaiKeyInput.value = localStorage.getItem('assemblyaiKey') || '';
-        this.geminiKeyInput.value = localStorage.getItem('geminiKey') || '';
-        this.murfKeyInput.value = localStorage.getItem('murfKey') || '';
-        this.tavilyKeyInput.value = localStorage.getItem('tavilyKey') || '';
-        this.gnewsKeyInput.value = localStorage.getItem('gnewsKey') || '';
-    }
-    
-    // ===============================================
-    // ✨✨✨ START OF THE FIX ✨✨✨
-    // ===============================================
-    
-    openConfigModal() {
-        // Instead of an alert, we change the display style to show the modal
-        this.configOverlay.style.display = 'flex';
-    }
-
-    closeConfigModal() {
-        // We hide the modal by setting the display style back to 'none'
-        this.configOverlay.style.display = 'none';
-    }
-
-    handleConfigSubmit(e) {
-        // Prevent the page from reloading
-        e.preventDefault();
-        
-        // ✨ Bonus: Save the keys to the browser's local storage
-        // This makes it so the user doesn't have to re-enter them every time.
-        localStorage.setItem('assemblyaiKey', this.assemblyaiKeyInput.value);
-        localStorage.setItem('geminiKey', this.geminiKeyInput.value);
-        localStorage.setItem('murfKey', this.murfKeyInput.value);
-        localStorage.setItem('tavilyKey', this.tavilyKeyInput.value);
-        localStorage.setItem('gnewsKey', this.gnewsKeyInput.value);
-        
-        console.log("API keys saved to browser's local storage.");
-        alert("Configuration saved locally! Remember, the server uses the keys from the .env file.");
-        
-        // Close the modal after saving
-        this.closeConfigModal();
-    }
-    
-    // ===============================================
-    // ✨✨✨ END OF THE FIX ✨✨✨
-    // ===============================================
-
-    initializeSocket() {
-        this.socket = io();
-        
-        this.socket.on('connect', () => {
-            console.log('Connected to server');
-            this.updateConnectionStatus('Connected', true);
-            this.updateStatus('Ready to chat!');
-            this.socket.emit('set_persona', { persona: this.currentPersona });
-        });
-        
-        this.socket.on('disconnect', () => {
-            console.log('Disconnected from server');
-            this.updateConnectionStatus('Disconnected', false);
-            this.updateStatus('Connection lost');
-        });
-        
-        this.socket.on('turn_detected', (data) => {
-            if (data.transcript) {
-                this.updateStatus(`💬 "${data.transcript}"`, 'processing');
-                this.micContainer.classList.add('processing');
-            }
-        });
-        
-        this.socket.on('turn_ended', (data) => {
-            if (data.final_transcript) {
-                this.addMessage(data.final_transcript, 'user');
-                this.micContainer.classList.remove('processing');
-                this.showTyping();
-                this.stopAudio();
-            }
-        });
-        
-        this.socket.on('audio_chunk', (base64Audio) => {
-            if (base64Audio) {
-                const audioData = this.base64ToArrayBuffer(base64Audio);
-                if (audioData.byteLength > 0) {
-                    this.audioQueue.push(audioData);
-                    if (!this.isProcessingQueue) {
-                        this.processAudioQueue();
-                    }
-                }
-            }
-        });
-        
-        this.socket.on('llm_chunk', (data) => {
-            this.hideTyping();
-            this.updateAssistantMessage(data.text);
-        });
-        
-        this.socket.on('llm_complete', () => {
-            this.hideTyping();
-        });
-    }
-
-    updateConnectionStatus(status, connected) {
-        this.connectionStatus.textContent = status;
-        this.connectionDot.className = `status-dot ${connected ? '' : 'disconnected'}`;
-    }
-
-    updateStatus(message, className = '') {
-        this.statusDisplay.textContent = message;
-        this.statusDisplay.className = `status-display ${className}`;
-    }
-
-    async toggleRecording() {
-        if (this.isRecording) {
-            this.stopRecording();
-        } else {
-            await this.startRecording();
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Voice Assistant Pro</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-    }
 
-    async startRecording() {
-        if (this.isRecording) return;
-        
-        try {
-            this.stopAudio();
-            
-            this.mediaStream = await navigator.mediaDevices.getUserMedia({ 
-                audio: { sampleRate: 16000, channelCount: 1 } 
-            });
-            
-            this.audioContext = new AudioContext({ sampleRate: 16000 });
-            
-            const workletBlob = new Blob([`
-                class PCMProcessor extends AudioWorkletProcessor {
-                    process(inputs) {
-                        this.port.postMessage(inputs[0][0]);
-                        return true;
-                    }
-                }
-                registerProcessor('pcm-processor', PCMProcessor);
-            `], { type: 'application/javascript' });
-            
-            const workletURL = URL.createObjectURL(workletBlob);
-            await this.audioContext.audioWorklet.addModule(workletURL);
-            
-            const mediaStreamSource = this.audioContext.createMediaStreamSource(this.mediaStream);
-            this.workletNode = new AudioWorkletNode(this.audioContext, 'pcm-processor');
-            
-            let audioBuffer = [];
-            this.workletNode.port.onmessage = (event) => {
-                audioBuffer.push(...event.data);
-                if (audioBuffer.length >= 4096) {
-                    const pcm16Data = new Int16Array(audioBuffer.length);
-                    for (let i = 0; i < audioBuffer.length; i++) {
-                        pcm16Data[i] = Math.max(-1, Math.min(1, audioBuffer[i])) * 0x7FFF;
-                    }
-                    this.socket.emit('stream', pcm16Data.buffer);
-                    audioBuffer = [];
-                }
-            };
-            
-            mediaStreamSource.connect(this.workletNode);
-            this.isRecording = true;
-            this.micContainer.classList.add('listening');
-            this.updateStatus('🎙️ Listening...', 'listening');
-            this.stopBtn.disabled = false;
-            
-        } catch (error) {
-            console.error('Error starting recording:', error);
-            this.updateStatus('❌ Microphone access denied');
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+            padding: 20px;
+            overflow-x: hidden;
         }
-    }
 
-    stopRecording() {
-        if (!this.isRecording) return;
-        
-        this.isRecording = false;
-        if (this.mediaStream) {
-            this.mediaStream.getTracks().forEach(track => track.stop());
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 30px;
+            align-items: start;
         }
-        if (this.workletNode) {
-            this.workletNode.disconnect();
-        }
-        if (this.audioContext) {
-            this.audioContext.close();
-        }
-        
-        this.micContainer.classList.remove('listening');
-        this.updateStatus('Ready to chat!');
-        this.stopBtn.disabled = true;
-    }
 
-    changePersona(e) {
-        this.currentPersona = e.target.value;
-        const personas = {
-            default: "Hello! I'm your AI assistant, ready to help you with questions, tasks, and conversations in a professional and friendly manner.",
-            pirate: "Ahoy matey! I be a salty pirate captain ready for adventure on the high seas! 🏴‍☠️",
-            scientist: "Fascinating! I'm a brilliant scientist eager to explore the mysteries of the universe through experimentation! ⚗️",
-            wizard: "By my ancient wisdom, I am a mystical wizard versed in the arcane arts and eternal knowledge! ✨",
-            robot: "GREETINGS HUMAN. I AM A LOGICAL ROBOT UNIT DESIGNED TO PROVIDE OPTIMAL ASSISTANCE AND EFFICIENCY. BEEP BOOP! 🤖",
-            chef: "Bonjour! I am a passionate master chef who lives and breathes the culinary arts! Magnifique! 👨‍🍳",
-            detective: "Good day. I'm a sharp-eyed detective who notices every detail and solves mysteries with keen observation. 🔍"
-        };
-        
-        this.personaPreview.textContent = personas[this.currentPersona];
-        
-        if (this.socket) {
-            this.socket.emit('set_persona', { persona: this.currentPersona });
+        .sidebar {
+            position: sticky;
+            top: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            padding: 25px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            max-height: calc(100vh - 40px);
+            overflow-y: auto;
         }
-    }
 
-    updateVolume(e) {
-        const volume = parseFloat(e.target.value);
-        this.volumeDisplay.textContent = `${Math.round(volume * 100)}%`;
-        if (this.gainNode) {
-            this.gainNode.gain.value = volume;
+        .main-content {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            height: calc(100vh - 40px);
+            display: flex;
+            flex-direction: column;
         }
-    }
 
-    clearChat() {
-        this.chatHistory.innerHTML = `
-            <div class="message assistant">
-                <div class="message-avatar">🤖</div>
-                <div class="message-content">
-                    Welcome back! I'm ready to help you with anything you need.
+        h1 {
+            text-align: center;
+            margin-bottom: 40px;
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(45deg, #ff6b9d, #c471ed, #12c2e9);
+            background-size: 200% 200%;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: gradientShift 3s ease-in-out infinite;
+            grid-column: 1 / -1;
+        }
+
+        @keyframes gradientShift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+
+        /* API Configuration Modal */
+        .config-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .config-modal {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(30px);
+            border-radius: 20px;
+            padding: 40px;
+            width: 90%;
+            max-width: 600px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.3);
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .config-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .config-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .close-btn {
+            background: none; border: none; color: white;
+            font-size: 1.5rem; cursor: pointer; width: 30px; height: 30px;
+            border-radius: 50%; display: flex; align-items: center;
+            justify-content: center; transition: background 0.3s ease;
+        }
+
+        .close-btn:hover { background: rgba(255, 255, 255, 0.2); }
+        .config-form { display: flex; flex-direction: column; gap: 20px; }
+        .config-field { display: flex; flex-direction: column; gap: 8px; }
+        .config-label { font-size: 0.9rem; font-weight: 500; color: rgba(255, 255, 255, 0.9); }
+        .config-input {
+            padding: 12px 16px; background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.2); border-radius: 10px;
+            color: white; font-size: 0.9rem; transition: all 0.3s ease; outline: none;
+        }
+        .config-input:focus { border-color: rgba(255, 255, 255, 0.4); background: rgba(255, 255, 255, 0.15); }
+        .config-input::placeholder { color: rgba(255, 255, 255, 0.5); }
+        .config-actions { display: flex; gap: 15px; margin-top: 20px; }
+        .config-btn {
+            flex: 1; padding: 12px 20px; border: none; border-radius: 12px;
+            cursor: pointer; font-size: 0.9rem; font-weight: 600; transition: all 0.3s ease;
+        }
+        .config-btn.primary { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
+        .config-btn.primary:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4); }
+        .config-btn.secondary {
+            background: rgba(255, 255, 255, 0.1); color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .config-btn.secondary:hover { background: rgba(255, 255, 255, 0.2); }
+
+        /* Header Actions */
+        .header-actions { display: flex; gap: 10px; margin-bottom: 25px; }
+        .header-btn {
+            padding: 8px 16px; background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 10px;
+            color: white; cursor: pointer; font-size: 0.8rem;
+            font-weight: 500; transition: all 0.3s ease;
+        }
+        .header-btn:hover { background: rgba(255, 255, 255, 0.2); transform: translateY(-1px); }
+
+        .status-indicator {
+            display: flex; align-items: center; gap: 8px; padding: 10px 15px;
+            background: rgba(255, 255, 255, 0.1); border-radius: 12px;
+            font-size: 0.85rem; margin-bottom: 20px; border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf50; animation: pulse 2s infinite; }
+        .status-dot.disconnected { background: #f44336; }
+
+        /* Skills Section */
+        .skills-section {
+            margin-bottom: 25px; background: rgba(255, 255, 255, 0.08);
+            border-radius: 16px; padding: 20px; border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        .skills-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            cursor: pointer;
+        }
+
+        .skills-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .skills-toggle {
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.3s ease;
+        }
+
+        .skills-toggle.expanded {
+            transform: rotate(180deg);
+        }
+
+        .skills-content {
+            display: none;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .skills-content.show {
+            display: grid;
+        }
+
+        .skill-card {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: visible;
+        }
+
+        .skill-card:hover {
+            background: rgba(255, 255, 255, 0.15);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .skill-icon {
+            font-size: 1.2rem;
+            margin-bottom: 6px;
+            display: block;
+        }
+
+        .skill-name {
+            font-size: 0.8rem;
+            font-weight: 500;
+            margin-bottom: 4px;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .skill-brief {
+            font-size: 0.7rem;
+            color: rgba(255, 255, 255, 0.6);
+            line-height: 1.2;
+        }
+
+        .skill-tooltip {
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            line-height: 1.3;
+            width: 200px;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+            margin-bottom: 8px;
+        }
+
+        .skill-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 6px solid transparent;
+            border-top-color: rgba(0, 0, 0, 0.9);
+        }
+
+        .skill-card:hover .skill-tooltip {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .tooltip-description {
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .tooltip-example {
+            color: rgba(255, 255, 255, 0.8);
+            font-style: italic;
+            font-size: 0.7rem;
+        }
+
+        /* Persona selector */
+        .persona-selector {
+            margin-bottom: 25px; background: rgba(255, 255, 255, 0.08);
+            border-radius: 16px; padding: 20px; border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+        .persona-label {
+            display: block; margin-bottom: 12px; font-size: 0.9rem;
+            font-weight: 600; color: rgba(255, 255, 255, 0.9);
+        }
+        .persona-dropdown {
+            width: 100%; padding: 12px 14px; background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.2); border-radius: 10px; color: white;
+            font-size: 0.9rem; font-weight: 500; cursor: pointer; transition: all 0.3s ease;
+            outline: none; appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat; background-position: right 10px center;
+            background-size: 14px; padding-right: 35px;
+        }
+        .persona-dropdown:hover, .persona-dropdown:focus {
+            border-color: rgba(255, 255, 255, 0.4); background: rgba(255, 255, 255, 0.15);
+        }
+        .persona-dropdown option { background: #2a2a3a; color: white; }
+        .persona-preview {
+            margin-top: 12px; padding: 12px 14px; background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px; font-size: 0.8rem; line-height: 1.4; color: rgba(255, 255, 255, 0.8);
+            border-left: 3px solid rgba(255, 255, 255, 0.3); min-height: 45px;
+        }
+
+        /* Microphone section */
+        .mic-section { text-align: center; margin-bottom: 25px; }
+        .mic-container {
+            position: relative; width: 140px; height: 140px;
+            margin: 0 auto 20px; cursor: pointer;
+        }
+        .mic-button {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 100px; height: 100px; background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            font-size: 2rem; transition: all 0.3s ease; border: 3px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+        .mic-button:hover { transform: translate(-50%, -50%) scale(1.05); box-shadow: 0 15px 40px rgba(0, 0, 0, 0.3); }
+        .mic-container.listening .mic-button {
+            background: linear-gradient(135deg, #ff6b9d, #c471ed);
+            animation: pulse 2s infinite; box-shadow: 0 0 40px rgba(255, 107, 157, 0.6);
+        }
+        .mic-container.processing .mic-button { background: linear-gradient(135deg, #f093fb, #f5576c); animation: processingPulse 1.5s infinite; }
+        .mic-container.speaking .mic-button { background: linear-gradient(135deg, #4facfe, #00f2fe); animation: speakingWave 1s infinite; }
+        @keyframes pulse { 0%, 100% { transform: translate(-50%, -50%) scale(1); } 50% { transform: translate(-50%, -50%) scale(1.1); } }
+        @keyframes processingPulse { 0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; } 50% { transform: translate(-50%, -50%) scale(1.05); opacity: 0.8; } }
+        @keyframes speakingWave { 0%, 100% { transform: translate(-50%, -50%) scale(1); } 50% { transform: translate(-50%, -50%) scale(1.06); } }
+
+        .status-display {
+            text-align: center; padding: 12px 20px; background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px; font-weight: 500; font-size: 0.9rem; min-height: 48px;
+            display: flex; align-items: center; justify-content: center;
+            border: 1px solid rgba(255, 255, 255, 0.1); transition: all 0.3s ease;
+        }
+        .status-display.listening { background: rgba(255, 107, 157, 0.2); border-color: rgba(255, 107, 157, 0.4); }
+        .status-display.processing { background: rgba(240, 147, 251, 0.2); border-color: rgba(240, 147, 251, 0.4); }
+        .status-display.speaking { background: rgba(79, 172, 254, 0.2); border-color: rgba(79, 172, 254, 0.4); }
+
+        /* Control buttons */
+        .controls { display: flex; gap: 10px; margin-bottom: 20px; }
+        .control-btn {
+            flex: 1; padding: 10px 14px; border: none; border-radius: 10px;
+            cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: all 0.3s ease;
+            background: rgba(255, 255, 255, 0.1); color: white; border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .control-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.2); transform: translateY(-1px); }
+        .control-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .control-btn.stop { background: rgba(244, 67, 54, 0.3); border-color: rgba(244, 67, 54, 0.5); }
+        .control-btn.stop:hover:not(:disabled) { background: rgba(244, 67, 54, 0.5); }
+
+        /* Volume control */
+        .volume-control { margin-bottom: 20px; }
+        .volume-label { display: block; margin-bottom: 8px; font-size: 0.85rem; font-weight: 500; }
+        .volume-slider {
+            width: 100%; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.2);
+            outline: none; -webkit-appearance: none; cursor: pointer;
+        }
+        .volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
+            background: linear-gradient(45deg, #667eea, #764ba2); cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+        }
+        .volume-display { text-align: center; margin-top: 5px; font-size: 0.75rem; opacity: 0.8; }
+
+        /* Chat area */
+        .conversation-header {
+            margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .conversation-title { font-size: 1.2rem; font-weight: 600; margin-bottom: 5px; }
+        .conversation-subtitle { font-size: 0.8rem; opacity: 0.7; }
+        .chat-history { flex: 1; overflow-y: auto; padding: 0 5px; margin-right: -5px; }
+        .chat-history::-webkit-scrollbar { width: 4px; }
+        .chat-history::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.1); border-radius: 2px; }
+        .chat-history::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.3); border-radius: 2px; }
+
+        .message { margin-bottom: 20px; animation: messageSlideIn 0.3s ease-out; display: flex; }
+        @keyframes messageSlideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .message.user { justify-content: flex-end; }
+        .message.assistant { justify-content: flex-start; }
+        .message-content {
+            max-width: 75%; padding: 14px 18px; border-radius: 18px; line-height: 1.5;
+            word-wrap: break-word; position: relative; font-size: 0.9rem;
+        }
+        .message.user .message-content {
+            background: linear-gradient(135deg, #667eea, #764ba2); color: white; border-bottom-right-radius: 6px;
+        }
+        .message.assistant .message-content {
+            background: rgba(255, 255, 255, 0.15); color: white; border-bottom-left-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .message-avatar {
+            width: 28px; height: 28px; border-radius: 50%; margin: 0 10px; display: flex;
+            align-items: center; justify-content: center; font-size: 1rem; flex-shrink: 0;
+        }
+        .message.user .message-avatar { background: linear-gradient(135deg, #667eea, #764ba2); order: 2; }
+        .message.assistant .message-avatar { background: rgba(255, 255, 255, 0.2); order: 1; }
+
+        .typing-indicator { display: none; justify-content: flex-start; margin-bottom: 20px; align-items: center; }
+        .typing-indicator.active { display: flex; }
+        .typing-content {
+            background: rgba(255, 255, 255, 0.15); padding: 14px 18px; border-radius: 18px;
+            border-bottom-left-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .typing-dots { display: flex; gap: 4px; }
+        .typing-dot {
+            width: 6px; height: 6px; background: rgba(255, 255, 255, 0.6);
+            border-radius: 50%; animation: typingBounce 1.4s infinite both;
+        }
+        .typing-dot:nth-child(2) { animation-delay: 0.16s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.32s; }
+        @keyframes typingBounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .container { grid-template-columns: 1fr; gap: 20px; }
+            h1 { font-size: 2rem; margin-bottom: 20px; }
+            .sidebar { position: static; max-height: none; }
+            .main-content { height: 60vh; min-height: 400px; }
+            .config-modal { margin: 20px; padding: 30px; }
+            .mic-container { width: 120px; height: 120px; }
+            .mic-button { width: 80px; height: 80px; font-size: 1.8rem; }
+            .skills-content { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>AI Voice Assistant Pro</h1>
+
+        <div class="sidebar">
+            <div class="header-actions">
+                <button class="header-btn" id="configBtn">⚙️ API Config</button>
+                <button class="header-btn" id="helpBtn">❓ Help</button>
+            </div>
+
+            <div class="status-indicator">
+                <div class="status-dot" id="connectionDot"></div>
+                <span id="connectionStatus">Connecting...</span>
+            </div>
+
+            <div class="skills-section">
+                <div class="skills-header" id="skillsHeader">
+                    <span class="skills-title">🛠️ Available Skills</span>
+                    <button class="skills-toggle" id="skillsToggle">▼</button>
+                </div>
+                <div class="skills-content" id="skillsContent">
+                    <div class="skill-card" data-skill="weather">
+                        <span class="skill-icon">🌤️</span>
+                        <div class="skill-name">Weather</div>
+                        <div class="skill-brief">Get current weather</div>
+                        <div class="skill-tooltip">
+                            <div class="tooltip-description">Get current weather information for any location</div>
+                            <div class="tooltip-example">Try: "What's the weather in Delhi?" or "How's the weather today?"</div>
+                        </div>
+                    </div>
+                    <div class="skill-card" data-skill="time">
+                        <span class="skill-icon">⏰</span>
+                        <div class="skill-name">Time</div>
+                        <div class="skill-brief">Get current time</div>
+                        <div class="skill-tooltip">
+                            <div class="tooltip-description">Get the current date and time</div>
+                            <div class="tooltip-example">Try: "What time is it?" or "Tell me the current date"</div>
+                        </div>
+                    </div>
+                    <div class="skill-card" data-skill="search">
+                        <span class="skill-icon">🔍</span>
+                        <div class="skill-name">Web Search</div>
+                        <div class="skill-brief">Search the web</div>
+                        <div class="skill-tooltip">
+                            <div class="tooltip-description">Perform web searches to find current information</div>
+                            <div class="tooltip-example">Try: "Search for latest AI news" or "Find information about quantum computing"</div>
+                        </div>
+                    </div>
+                    <div class="skill-card" data-skill="news">
+                        <span class="skill-icon">📰</span>
+                        <div class="skill-name">Latest News</div>
+                        <div class="skill-brief">Get news headlines</div>
+                        <div class="skill-tooltip">
+                            <div class="tooltip-description">Get the latest news headlines on specific topics</div>
+                            <div class="tooltip-example">Try: "Get news about technology" or "What's happening in sports?"</div>
+                        </div>
+                    </div>
+                    <div class="skill-card" data-skill="todo-add">
+                        <span class="skill-icon">➕</span>
+                        <div class="skill-name">Add Todo</div>
+                        <div class="skill-brief">Add task to list</div>
+                        <div class="skill-tooltip">
+                            <div class="tooltip-description">Add new items to your personal to-do list</div>
+                            <div class="tooltip-example">Try: "Add buy groceries to my todo list" or "Remind me to call mom"</div>
+                        </div>
+                    </div>
+                    <div class="skill-card" data-skill="todo-view">
+                        <span class="skill-icon">📋</span>
+                        <div class="skill-name">View Todos</div>
+                        <div class="skill-brief">See your tasks</div>
+                        <div class="skill-tooltip">
+                            <div class="tooltip-description">View all items currently on your to-do list</div>
+                            <div class="tooltip-example">Try: "Show my todo list" or "What's on my task list?"</div>
+                        </div>
+                    </div>
                 </div>
             </div>
-        `;
-    }
 
-    addMessage(text, type) {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${type}`;
-        
-        const avatar = document.createElement('div');
-        avatar.className = 'message-avatar';
-        avatar.textContent = type === 'user' ? '👤' : '🤖';
-        
-        const content = document.createElement('div');
-        content.className = 'message-content';
-        content.textContent = text;
-        
-        messageDiv.appendChild(avatar);
-        messageDiv.appendChild(content);
-        this.chatHistory.appendChild(messageDiv);
-        this.chatHistory.scrollTop = this.chatHistory.scrollHeight;
-    }
+            <div class="persona-selector">
+                <label class="persona-label" for="personaSelect">🎭 Choose AI Persona</label>
+                <select class="persona-dropdown" id="personaSelect">
+                    <option value="default">🤖 Default Assistant</option>
+                    <option value="pirate">🏴‍☠️ Pirate Captain</option>
+                    <option value="scientist">🔬 Mad Scientist</option>
+                    <option value="wizard">🧙‍♂️ Ancient Wizard</option>
+                    <option value="robot">🤖 Friendly Robot</option>
+                    <option value="chef">👨‍🍳 Master Chef</option>
+                    <option value="detective">🕵️‍♂️ Detective</option>
+                </select>
+                <div class="persona-preview" id="personaPreview">
+                    Hello! I'm your AI assistant, ready to help...
+                </div>
+            </div>
 
-    updateAssistantMessage(text) {
-        let lastMessage = this.chatHistory.querySelector('.message.assistant:last-child .message-content');
-        if (!lastMessage) {
-            this.addMessage('', 'assistant');
-            lastMessage = this.chatHistory.querySelector('.message.assistant:last-child .message-content');
-        }
-        lastMessage.textContent += text;
-        this.chatHistory.scrollTop = this.chatHistory.scrollHeight;
-    }
+            <div class="mic-section">
+                <div class="mic-container" id="micContainer">
+                    <div class="mic-button" id="micBtn">🎤</div>
+                </div>
+                <div class="status-display" id="statusDisplay">
+                    Ready to Chat
+                </div>
+            </div>
 
-    showTyping() {
-        this.typingIndicator.classList.add('active');
-    }
+            <div class="controls">
+                <button class="control-btn stop" id="stopBtn" disabled>🛑 Stop</button>
+                <button class="control-btn" id="clearBtn">🗑️ Clear</button>
+            </div>
 
-    hideTyping() {
-        this.typingIndicator.classList.remove('active');
-    }
+            <div class="volume-control">
+                <label class="volume-label" for="volumeSlider">🔊 Volume</label>
+                <input type="range" class="volume-slider" id="volumeSlider" min="0" max="1" step="0.1" value="0.8">
+                <div class="volume-display" id="volumeDisplay">80%</div>
+            </div>
+        </div>
 
-    base64ToArrayBuffer(base64) {
-        try {
-            const binaryString = window.atob(base64);
-            const len = binaryString.length;
-            const bytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-            }
-            return bytes.buffer;
-        } catch (error) {
-            console.error('Error decoding base64:', error);
-            return new ArrayBuffer(0);
-        }
-    }
+        <div class="main-content">
+            <div class="conversation-header">
+                <div class="conversation-title">Conversation</div>
+                <div class="conversation-subtitle">Click the mic and start speaking</div>
+            </div>
 
-    async processAudioQueue() {
-        if (this.isProcessingQueue || this.audioQueue.length === 0) return;
-        
-        this.isProcessingQueue = true;
-        
-        try {
-            await this.initializePlaybackContext();
-            const pcmData = this.audioQueue.shift();
-            if (pcmData && pcmData.byteLength > 0) {
-                await this.processAudioChunk(pcmData);
-            }
-        } catch (error) {
-            console.error('Error processing audio queue:', error);
-        } finally {
-            this.isProcessingQueue = false;
-            if (this.audioQueue.length > 0) {
-                setTimeout(() => this.processAudioQueue(), 10);
-            }
-        }
-    }
+            <div class="chat-history" id="chatHistory">
+                <div class="message assistant">
+                    <div class="message-avatar">🤖</div>
+                    <div class="message-content">
+                        Welcome! Click the microphone in the sidebar to start our conversation.
+                    </div>
+                </div>
+            </div>
 
-    async initializePlaybackContext() {
-        if (!this.playbackContext || this.playbackContext.state === 'closed') {
-            this.playbackContext = new (window.AudioContext || window.webkitAudioContext)({
-                sampleRate: 44100 
-            });
-            
-            this.gainNode = this.playbackContext.createGain();
-            this.gainNode.gain.value = parseFloat(this.volumeSlider.value);
-            this.gainNode.connect(this.playbackContext.destination);
-            this.nextStartTime = 0;
-        }
-        
-        if (this.playbackContext.state === 'suspended') {
-            await this.playbackContext.resume();
-        }
-    }
+            <div class="typing-indicator" id="typingIndicator">
+                <div class="message-avatar">🤖</div>
+                <div class="typing-content">
+                    <div class="typing-dots">
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
-    async processAudioChunk(pcmData) {
-        try {
-            const samples = pcmData.byteLength / 2;
-            if (samples === 0) return;
-            
-            const audioBuffer = this.playbackContext.createBuffer(1, samples, 44100);
-            const channelData = audioBuffer.getChannelData(0);
-            
-            const pcm16 = new Int16Array(pcmData);
-            for (let i = 0; i < samples; i++) {
-                channelData[i] = pcm16[i] / 32768;
-            }
-            
-            const source = this.playbackContext.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(this.gainNode);
-            
-            const currentTime = this.playbackContext.currentTime;
-            const startTime = (this.nextStartTime > currentTime) ? this.nextStartTime : currentTime;
-            
-            source.start(startTime);
-            this.nextStartTime = startTime + audioBuffer.duration;
-            this.activeSourceNodes.push(source);
-            
-            source.onended = () => {
-                this.activeSourceNodes = this.activeSourceNodes.filter(s => s !== source);
-                if (this.audioQueue.length === 0 && this.activeSourceNodes.length === 0) {
-                    this.micContainer.classList.remove('speaking');
-                    this.updateStatus(this.isRecording ? '🎙️ Listening...' : 'Ready to chat!');
-                }
-            };
-            
-            if (this.activeSourceNodes.length === 1) {
-                this.micContainer.classList.add('speaking');
-                this.updateStatus('🔊 AI is speaking...', 'speaking');
-            }
-            
-        } catch (error) {
-            console.error('Error processing audio chunk:', error);
-        }
-    }
-
-    stopAudio() {
-        if (this.playbackContext && this.playbackContext.state !== 'closed') {
-            this.activeSourceNodes.forEach(source => {
-                try {
-                    if (source.buffer) source.stop();
-                } catch (e) {
-                    // Source may already be stopped
-                }
-            });
-            this.playbackContext.close().catch(e => console.error('Error closing audio context:', e));
-        }
-        
-        this.audioQueue = [];
-        this.activeSourceNodes = [];
-        this.nextStartTime = 0;
-        this.isProcessingQueue = false;
-        this.playbackContext = null;
-        this.gainNode = null;
-        this.micContainer.classList.remove('speaking');
-    }
-}
-
-// Initialize the application when the page loads
-document.addEventListener('DOMContentLoaded', () => {
-    new VoiceAssistantPro();
-});
+    <div class="config-overlay" id="configOverlay">
+        <div class="config-modal">
+            <div class="config-header">
+                <h2 class="config-title">🔐 API Configuration</h2>
+                <button class="close-btn" id="closeConfigBtn">×</button>
+            </div>
+            <form class="config-form" id="configForm">
+                <div class="config-field">
+                    <label class="config-label" for="assemblyaiKey">AssemblyAI API Key *</label>
+                    <input type="password" class="config-input" id="assemblyaiKey" placeholder="Enter your AssemblyAI API key" required>
+                </div>
+                <div class="config-field">
+                    <label class="config-label" for="geminiKey">Google Gemini API Key *</label>
+                    <input type="password" class="config-input" id="geminiKey" placeholder="Enter your Google Gemini API key" required>
+                </div>
+                <div class="config-field">
+                    <label class="config-label" for="murfKey">Murf AI API Key *</label>
+                    <input type="password" class="config-input" id="murfKey" placeholder="Enter your Murf AI API key" required>
+                </div>
+                <div class="config-field">
+                    <label class="config-label" for="tavilyKey">Tavily API Key (Optional)</label>
+                    <input type="password" class="config-input" id="tavilyKey" placeholder="Enter your Tavily API key for web search">
+                </div>
+                <div class="config-field">
+                    <label class="config-label" for="gnewsKey">GNews API Key (Optional)</label>
+                    <input type="password" class="config-input" id="gnewsKey" placeholder="Enter your GNews API key for news">
+                </div>
+                <div class="config-actions">
+                    <button type="button" class="config-btn secondary" id="cancelConfigBtn">Cancel</button>
+                    <button type="submit" class="config-btn primary">Save & Connect</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    
+ <script src="/static/script.js" defer></script>
+</body>
+</html>

@@ -1,71 +1,215 @@
-🤖 AI Conversational Voice Agent
-This project is a fully functional, voice-powered conversational AI agent built as part of the #30DaysOfAIVoiceAgents challenge by Murf AI. The agent can listen to a user's voice, understand the context of a conversation, generate an intelligent response, and speak that response back in a natural-sounding AI voice.
+🎙️ AI Voice Assistant Pro
 
-This repository documents the core application built up to Day 13 of the challenge.
+A real-time intelligent voice agent built with Flask, SocketIO, AssemblyAI, Google Gemini, and Murf AI.
+It combines speech recognition, natural conversations, and lifelike voices with customizable personas and skills.
 
 ✨ Features
-This application is packed with features that create a seamless and intelligent conversational experience:
+🎛 Core Functionality
 
-Voice-to-Text Transcription: Utilizes AssemblyAI's powerful speech-to-text engine to accurately transcribe user's spoken words in real-time.
+🗣 Real-time Speech Recognition → Powered by AssemblyAI (streaming + turn detection)
 
-Intelligent Conversational AI: Leverages Google's Gemini Pro model to understand context, answer questions, and generate human-like text responses.
+🤖 Intelligent Responses → Google Gemini with function calling
 
-Persistent Memory: The agent remembers previous turns in the conversation. You can ask follow-up questions, and it will know what you're talking about.
+🔊 Natural Text-to-Speech → Murf AI high-quality voice synthesis
 
-Text-to-Speech Synthesis: Uses Murf AI to convert the AI's text responses into high-quality, natural-sounding audio.
+👤 Multiple AI Personas → 7 personality types to choose from
 
-Continuous Conversation Loop: The agent automatically starts listening for the user's next turn after it finishes speaking, creating a fluid, back-and-forth chat experience.
+⚡ Live Audio Streaming → WebSocket-based low-latency pipeline
 
-Robust Error Handling: The application is designed to fail gracefully. If any of the external API services are unavailable, the user will hear a helpful audio message instead of the application crashing.
+🛠 Built-in Skills
+Skill	Description
+🌦 Weather	Current weather in any location
+⏰ Time & Date	Current timestamp and date
+🔍 Web Search	Internet search (via Tavily)
+📰 Latest News	News headlines (via GNews)
+📝 Todo Manager	Add & view personal task lists
+💬 General Chat	Natural conversations
+👤 AI Personas
 
-Standalone Voice Generator: Includes a separate utility to quickly convert any typed text into speech for testing or other purposes.
+🧑‍💼 Default Assistant – Professional & helpful
 
-🛠️ Tech Stack & Architecture
-The project follows a simple client-server architecture.
+☠️ Pirate Captain – Nautical slang & adventurous
 
-Backend: A Python server using the Flask web framework. It exposes API endpoints to handle the core logic.
+🔬 Mad Scientist – Excited about discoveries
 
-Frontend: A clean, modern user interface built with vanilla HTML, CSS, and JavaScript. No complex frameworks are needed.
+🧙 Ancient Wizard – Mystical & wise
 
-The application's logic is a three-step pipeline orchestrated by the Flask server:
+🤖 Friendly Robot – Logical, curious about humans
 
-Speech-to-Text (STT): The frontend records the user's voice and sends the audio file to the server. The server forwards this to the AssemblyAI API for transcription.
+👨‍🍳 Master Chef – French cooking flair
 
-Language Model (LLM): The transcribed text, along with the session's chat history, is sent to the Google Gemini API. Gemini generates a context-aware response.
+🕵️ Detective – Sharp & analytical
 
-Text-to-Speech (TTS): The text response from Gemini is sent to the Murf AI API, which returns a URL for the final audio file. This URL is sent back to the frontend to be played automatically.
+🔑 Prerequisites
+Required API Keys
 
-🚀 Getting Started
-Follow these instructions to get the project running locally or on a cloud environment like Replit.
+AssemblyAI
+ → Speech recognition
 
-1. Clone the Repository
-git clone <your-repository-url>
-cd <your-project-directory>
+Google Gemini
+ → AI responses
 
-2. Install Dependencies
-This project uses pip for package management.
+Murf AI
+ → Text-to-speech
 
-pip install flask python-dotenv murf-ai assemblyai google-generativeai
+Optional API Keys
 
-3. Set Up Environment Variables
-You need to get API keys from three services. Create a file named .env in the root of your project and add your keys to it.
+Tavily
+ → Web search
 
-# Get from [https://assemblyai.com/](https://assemblyai.com/)
-ASSEMBLYAI_API_KEY="YOUR_ASSEMBLYAI_API_KEY"
+GNews
+ → News
 
-# Get from [https://aistudio.google.com/](https://aistudio.google.com/)
-GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+⚙️ Installation
+1️⃣ Clone the Repo
+git clone <repository-url>
+cd ai-voice-assistant-pro
 
-# Get from [https://murf.ai/](https://murf.ai/)
-MURF_API_KEY="YOUR_MURF_API_KEY"
+2️⃣ Install Dependencies
+pip install -r requirements.txt
 
-Note: If you are using Replit, you should use the built-in Secrets manager instead of a .env file. The variable names are the same.
+3️⃣ Configure Environment
 
-4. Run the Application
-Once the dependencies are installed and your environment variables are set, you can start the Flask server.
+Create .env in project root:
 
+ASSEMBLYAI_API_KEY=your_assemblyai_api_key_here
+GEMINI_API_KEY=your_google_gemini_api_key_here
+MURF_API_KEY=your_murf_ai_api_key_here
+TAVILY_API_KEY=your_tavily_api_key_here
+GNEWS_API_KEY=your_gnews_api_key_here
+
+SECRET_KEY=your_secret_key_here
+PORT=5000
+
+4️⃣ Run the App
 python app.py
 
-The server will start, and you can access the application by opening http://127.0.0.1:5000 in your web browser.
 
-Enjoy your conversation! 🎙️
+➡️ Open: http://localhost:5000
+
+🎤 Usage
+
+🎙 Grant microphone access
+
+👤 Select persona from dropdown
+
+🗣 Speak naturally (e.g. “What’s the weather in Delhi?”)
+
+🔊 Listen to AI’s voice reply
+
+⚡ Use skills like weather, news, todos, etc.
+
+Example Commands
+
+🌦 “What’s the weather in Mumbai?”
+
+⏰ “What time is it right now?”
+
+📰 “Give me today’s tech news.”
+
+📝 “Add call mom to my todo list.”
+
+😂 “Tell me a joke.”
+
+🏗 Architecture
+
+Backend
+
+Flask + SocketIO (real-time communication)
+
+AssemblyAI (STT)
+
+Gemini (AI reasoning)
+
+Murf AI (TTS)
+
+Tool integrations (Weather, News, Search, Todos)
+
+Frontend
+
+🎨 Glassmorphism UI
+
+🎧 WebAudio API (mic + playback)
+
+📱 Responsive design
+
+⚡ Real-time updates with smooth animations
+
+Data Flow
+
+🎙 User speaks → AssemblyAI transcribes
+
+🧠 Transcript → Gemini processes with skills
+
+🔊 Response → Murf AI converts to speech
+
+🌐 Streamed back to browser
+
+🐞 Troubleshooting
+Issue	Fix
+🎙 Mic not working	Allow permissions, close other apps
+🔇 No audio	Check browser audio, volume
+🔑 API error	Re-check .env keys
+🐢 Lag	Check internet speed, reduce open tabs
+🗂 Project Structure
+ai-voice-assistant-pro/
+├── app.py               # Main Flask app
+├── templates/index.html # Frontend UI
+├── static/script.js     # Client-side JS
+├── .env                 # Environment keys
+├── requirements.txt     # Python deps
+└── README.md            # Documentation
+
+🛠 Extending
+
+Add new skills → Create a function in app.py & register in tools list
+
+Add new personas → Extend the PERSONAS dictionary
+
+Customize UI → Edit index.html & style.css
+
+Tune voices → Adjust Murf AI settings
+
+🔒 Security
+
+API keys stored in .env (not in code)
+
+Each client has isolated session & todos
+
+Proper WebSocket cleanup
+
+Input validation
+
+📈 Performance
+
+Efficient audio streaming + buffering
+
+Async + threading for concurrency
+
+Optimized real-time updates
+
+🤝 Contributing
+
+Fork repo
+
+Create feature branch
+
+Add & test your feature
+
+Submit PR
+
+📜 License
+
+Open source – check API providers’ terms.
+
+💡 Support
+
+🔍 Check Troubleshooting
+
+🖥 Open browser console for errors
+
+🔑 Verify .env API keys
+
+🌐 Ensure stable internet
+
+✨ With AI Voice Assistant Pro, every conversation feels smarter, faster, and more natural.
